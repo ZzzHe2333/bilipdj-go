@@ -25,32 +25,38 @@ type PlatformConfig struct {
 	Cookie  string `json:"cookie,omitempty"`
 }
 type Config struct {
-	Bilibili    PlatformConfig `json:"bilibili"`
-	Douyin      PlatformConfig `json:"douyin"`
-	AutoQueue   bool           `json:"auto_queue"`
-	Command     string         `json:"command"`
-	MaxQueue    int            `json:"max_queue"`
-	Admins      []string       `json:"admins"`
-	Blacklist   []string       `json:"blacklist"`
-	Language    string         `json:"language"`
-	ArchiveSlot int            `json:"archive_slot"`
-	Switches    *QueueSwitches `json:"switches,omitempty"`
+	Bilibili            PlatformConfig `json:"bilibili"`
+	Douyin              PlatformConfig `json:"douyin"`
+	AutoQueue           bool           `json:"auto_queue"`
+	Command             string         `json:"command"`
+	MaxQueue            int            `json:"max_queue"`
+	Admins              []string       `json:"admins"`
+	SuperAdmins         []string       `json:"super_admins"`
+	Guards              []string       `json:"guards"`
+	DailyQueueLimit     int            `json:"daily_queue_limit"`
+	DailyQueueResetTime string         `json:"daily_queue_reset_time"`
+	Blacklist           []string       `json:"blacklist"`
+	Language            string         `json:"language"`
+	ArchiveSlot         int            `json:"archive_slot"`
+	Switches            *QueueSwitches `json:"switches,omitempty"`
 }
 
 // QueueSwitches maps the supported legacy kaiguan.yaml flags.
 // The pointer differentiates an old saved state from disabled settings.
 type QueueSwitches struct {
-	Paidui bool `json:"paidui"`
-	Guanfu bool `json:"guanfu_paidui"`
-	Bfu    bool `json:"bfu_paidui"`
-	Chaoji bool `json:"chaoji_paidui"`
-	Mifu   bool `json:"mifu_paidui"`
-	Cancel bool `json:"quxiao_paidui"`
-	Modify bool `json:"xiugai_paidui"`
+	Paidui            bool `json:"paidui"`
+	Guanfu            bool `json:"guanfu_paidui"`
+	Bfu               bool `json:"bfu_paidui"`
+	Chaoji            bool `json:"chaoji_paidui"`
+	Mifu              bool `json:"mifu_paidui"`
+	Cancel            bool `json:"quxiao_paidui"`
+	Modify            bool `json:"xiugai_paidui"`
+	GuardInsert       bool `json:"jianzhang_chadui"`
+	RoomAdminOperator bool `json:"fangguan_op"`
 }
 
 func defaultSwitches() *QueueSwitches {
-	return &QueueSwitches{Paidui: true, Guanfu: true, Bfu: true, Chaoji: true, Mifu: true, Cancel: true, Modify: true}
+	return &QueueSwitches{Paidui: true, Guanfu: true, Bfu: true, Chaoji: true, Mifu: true, Cancel: true, Modify: true, GuardInsert: false, RoomAdminOperator: false}
 }
 
 type QueueItem struct {
@@ -61,13 +67,16 @@ type QueueItem struct {
 	Username string    `json:"username"`
 	Note     string    `json:"note"`
 	At       time.Time `json:"at"`
+	Guard    bool      `json:"guard,omitempty"`
 }
 type persisted struct {
-	Config     Config                 `json:"config"`
-	Queue      []QueueItem            `json:"queue"`
-	Slots      map[string][]QueueItem `json:"slots,omitempty"`
-	Style      map[string]any         `json:"style,omitempty"`
-	Appearance map[string]any         `json:"appearance,omitempty"`
+	Config      Config                 `json:"config"`
+	Queue       []QueueItem            `json:"queue"`
+	Slots       map[string][]QueueItem `json:"slots,omitempty"`
+	DailyPeriod string                 `json:"daily_period,omitempty"`
+	DailyCounts map[string]int         `json:"daily_counts,omitempty"`
+	Style       map[string]any         `json:"style,omitempty"`
+	Appearance  map[string]any         `json:"appearance,omitempty"`
 }
 type Event struct {
 	Type string `json:"type"`
@@ -78,6 +87,8 @@ type App struct {
 	config      Config
 	queue       []QueueItem
 	slots       map[string][]QueueItem
+	dailyPeriod string
+	dailyCounts map[string]int
 	style       map[string]any
 	appearance  map[string]any
 	messages    []live.Event
@@ -91,18 +102,25 @@ type App struct {
 }
 
 func New(dataDir, version, repo string) *App {
-	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
 	raw, e := os.ReadFile(a.dataPath)
 	if e == nil {
 		var p persisted
 		if json.Unmarshal(raw, &p) == nil {
 			a.config = p.Config
+			a.dailyPeriod = p.DailyPeriod
+			if p.DailyCounts != nil {
+				a.dailyCounts = p.DailyCounts
+			}
 			if a.config.Switches == nil {
 				a.config.Switches = defaultSwitches()
 			}
 			if a.config.MaxQueue == 0 {
 				a.config.MaxQueue = 100
+			}
+			if a.config.DailyQueueResetTime == "" {
+				a.config.DailyQueueResetTime = "04:00"
 			}
 			if a.config.Language == "" {
 				a.config.Language = "中文"
@@ -137,7 +155,7 @@ func New(dataDir, version, repo string) *App {
 }
 func (a *App) saveLocked() error {
 	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
-	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, Style: a.style, Appearance: a.appearance}, "", "  ")
+	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}
@@ -299,6 +317,15 @@ func cleanConfig(c Config) (Config, error) {
 	if c.MaxQueue < 0 || c.MaxQueue > 10000 {
 		return c, errors.New("排队人数上限必须为 0 至 10000")
 	}
+	if c.DailyQueueLimit < 0 || c.DailyQueueLimit > 999 {
+		return c, errors.New("每日排队次数上限必须为 0 至 999")
+	}
+	if c.DailyQueueResetTime == "" {
+		c.DailyQueueResetTime = "04:00"
+	}
+	if _, e := time.Parse("15:04", c.DailyQueueResetTime); e != nil || len(c.DailyQueueResetTime) != 5 {
+		return c, errors.New("每日重置时间必须为 HH:MM")
+	}
 	if c.ArchiveSlot < 0 || c.ArchiveSlot > 10 {
 		return c, errors.New("存档槽位必须为 1 至 10")
 	}
@@ -308,7 +335,7 @@ func cleanConfig(c Config) (Config, error) {
 	if c.Switches == nil {
 		c.Switches = defaultSwitches()
 	}
-	if len(c.Blacklist) > 5000 || len(c.Admins) > 1000 {
+	if len(c.Blacklist) > 5000 || len(c.Admins) > 1000 || len(c.SuperAdmins) > 1000 || len(c.Guards) > 1000 {
 		return c, errors.New("黑名单或管理员数量超过上限")
 	}
 	if c.Language == "" {
@@ -441,6 +468,8 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			a.switchSlotLocked(cfg.ArchiveSlot)
 		}
 		a.config = cfg
+		// A blacklisted name cannot retain operator/guard roles.
+		a.stripBlacklistedRolesLocked()
 		e = a.saveLocked()
 		a.mu.Unlock()
 		if e != nil {

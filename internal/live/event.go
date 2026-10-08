@@ -7,11 +7,14 @@ import (
 )
 
 type Event struct {
-	Platform string    `json:"platform"`
-	UserID   string    `json:"user_id"`
-	Username string    `json:"username"`
-	Content  string    `json:"content"`
-	Time     time.Time `json:"time"`
+	Platform    string    `json:"platform"`
+	UserID      string    `json:"user_id"`
+	Username    string    `json:"username"`
+	Content     string    `json:"content"`
+	IsRoomAdmin bool      `json:"is_room_admin,omitempty"`
+	IsAnchor    bool      `json:"is_anchor,omitempty"`
+	GuardLevel  int       `json:"guard_level,omitempty"`
+	Time        time.Time `json:"time"`
 }
 
 type Status struct {

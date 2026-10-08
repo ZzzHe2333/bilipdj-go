@@ -229,7 +229,7 @@ func TestBiliDiscoverySignedPreferred(t *testing.T) {
 		case "/x/frontend/finger/spi":
 			raw = `{"code":0,"data":{"b_3":"id123"}}`
 		case "/room/v1/Room/room_init":
-			raw = `{"code":0,"data":{"room_id":998}}`
+			raw = `{"code":0,"data":{"room_id":998,"uid":12345}}`
 		case "/x/web-interface/nav":
 			raw = `{"code":0,"data":{"wbi_img":{"img_url":"https://i/abcdefghijklmnopqrstuvwxyz012345.png","sub_url":"https://i/ABCDEFGHIJKLMNOPQRSTUVWXYZ012345.png"}}}`
 		case "/xlive/web-room/v1/index/getDanmuInfo":
@@ -246,8 +246,8 @@ func TestBiliDiscoverySignedPreferred(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(raw)), Header: make(http.Header), Request: req}, nil
 	})}
 	b := Bilibili{Client: client}
-	id, key, hosts, cookie, err := b.discover(context.Background(), "123", "")
-	if err != nil || id != 998 || key != "opaque" || len(hosts) != 1 || hosts[0].WSSPort != 2245 || !strings.Contains(cookie, "buvid3=id123") {
+	id, anchorUID, key, hosts, cookie, err := b.discover(context.Background(), "123", "")
+	if err != nil || id != 998 || anchorUID != 12345 || key != "opaque" || len(hosts) != 1 || hosts[0].WSSPort != 2245 || !strings.Contains(cookie, "buvid3=id123") {
 		t.Fatalf("%d %q %+v %v", id, key, hosts, err)
 	}
 }

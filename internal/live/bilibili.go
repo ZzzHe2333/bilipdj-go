@@ -28,6 +28,7 @@ type biliRoom struct {
 	Code int `json:"code"`
 	Data struct {
 		RoomID int64 `json:"room_id"`
+		UID    int64 `json:"uid"`
 	} `json:"data"`
 }
 type biliHost struct {
@@ -88,19 +89,19 @@ func biliRoomID(input string) (int64, error) {
 	}
 	return n, nil
 }
-func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, string, []biliHost, string, error) {
+func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, int64, string, []biliHost, string, error) {
 	id, e := biliRoomID(room)
 	if e != nil {
-		return 0, "", nil, "", e
+		return 0, 0, "", nil, "", e
 	}
 	httpClient := b.client()
 	cookie = b.discoveryCookie(ctx, cookie)
 	var init biliRoom
 	if e = biliGet(ctx, httpClient, fmt.Sprintf("%s/room/v1/Room/room_init?id=%d", biliAPI, id), cookie, &init); e != nil {
-		return 0, "", nil, "", e
+		return 0, 0, "", nil, "", e
 	}
 	if init.Code != 0 || init.Data.RoomID <= 0 {
-		return 0, "", nil, "", fmt.Errorf("B站直播间解析失败 code=%d", init.Code)
+		return 0, 0, "", nil, "", fmt.Errorf("B站直播间解析失败 code=%d", init.Code)
 	}
 	id = init.Data.RoomID
 	var errorsSeen []string
@@ -113,7 +114,7 @@ func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, str
 			if len(hosts) == 0 {
 				hosts = conf.Data.Fallback
 			}
-			return id, conf.Data.Token, hosts, cookie, nil
+			return id, init.Data.UID, conf.Data.Token, hosts, cookie, nil
 		}
 		errorsSeen = append(errorsSeen, fmt.Sprintf("signed getDanmuInfo code=%d err=%v", conf.Code, e))
 	} else {
@@ -134,12 +135,12 @@ func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, str
 				hosts = conf.Data.Fallback
 			}
 			if len(hosts) > 0 {
-				return id, conf.Data.Token, hosts, cookie, nil
+				return id, init.Data.UID, conf.Data.Token, hosts, cookie, nil
 			}
 		}
 		errorsSeen = append(errorsSeen, fmt.Sprintf("getDanmuInfo fallback code=%d err=%v", conf.Code, e))
 	}
-	return 0, "", nil, "", fmt.Errorf("B站认证 token/节点获取失败；请尝试填入有效的 B站 Cookie（含 buvid3）后重试；%s", strings.Join(errorsSeen, "; "))
+	return 0, 0, "", nil, "", fmt.Errorf("B站认证 token/节点获取失败；请尝试填入有效的 B站 Cookie（含 buvid3）后重试；%s", strings.Join(errorsSeen, "; "))
 }
 func biliPacket(operation int, body []byte) []byte {
 	p := make([]byte, 16+len(body))
@@ -214,7 +215,20 @@ func biliMessage(data []byte) (Event, bool) {
 	if msg == "" || name == "" {
 		return Event{}, false
 	}
-	return Event{Platform: "bilibili", UserID: id.String(), Username: name, Content: msg, Time: time.Now()}, true
+	isRoomAdmin := false
+	var role int
+	if len(user) > 2 {
+		_ = json.Unmarshal(user[2], &role)
+		isRoomAdmin = role == 1
+	}
+	guardLevel := 0
+	if len(x.Info) > 3 {
+		var medal []json.RawMessage
+		if json.Unmarshal(x.Info[3], &medal) == nil && len(medal) > 10 {
+			_ = json.Unmarshal(medal[10], &guardLevel)
+		}
+	}
+	return Event{Platform: "bilibili", UserID: id.String(), Username: name, Content: msg, IsRoomAdmin: isRoomAdmin, GuardLevel: guardLevel, Time: time.Now()}, true
 }
 
 // biliCandidate chooses encrypted WebSocket first: Bilibili currently exposes
@@ -314,7 +328,7 @@ func readBiliAuth(stream biliStream) error {
 
 func (b Bilibili) connect(ctx context.Context, room, cookie string, emit Emit, report Report) error {
 	report(Status{Platform: "bilibili", Connected: false, Message: "正在发现 B站弹幕服务器…", Since: time.Now()})
-	id, token, hosts, discoveryCookie, err := b.discover(ctx, room, cookie)
+	id, anchorUID, token, hosts, discoveryCookie, err := b.discover(ctx, room, cookie)
 	if err != nil {
 		return err
 	}
@@ -338,7 +352,13 @@ func (b Bilibili) connect(ctx context.Context, room, cookie string, emit Emit, r
 			stream.Close()
 			return e
 		}
-		e = runBiliStream(ctx, stream, auth, id, transport, emit, report)
+		e = runBiliStream(ctx, stream, auth, id, transport, func(event Event) {
+			// Anchor identity is determined by authoritative room_init UID.
+			if anchorUID > 0 && event.UserID == strconv.FormatInt(anchorUID, 10) {
+				event.IsAnchor = true
+			}
+			emit(event)
+		}, report)
 		stream.Close()
 		if ctx.Err() != nil {
 			return ctx.Err()

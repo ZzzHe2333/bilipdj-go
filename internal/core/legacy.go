@@ -28,16 +28,18 @@ type LegacyPreview struct {
 	BlacklistCount int            `json:"blacklist_count"`
 }
 type legacyMigration struct {
-	preview    LegacyPreview
-	cfg        Config
-	style      map[string]any
-	appearance map[string]any
-	queue      []QueueItem
-	slots      map[string][]QueueItem
+	preview     LegacyPreview
+	cfg         Config
+	style       map[string]any
+	appearance  map[string]any
+	queue       []QueueItem
+	slots       map[string][]QueueItem
+	dailyPeriod string
+	dailyCounts map[string]int
 }
 
 func defaultConfig() Config {
-	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, Language: "中文", ArchiveSlot: 1, Switches: defaultSwitches(), Admins: []string{}, Blacklist: []string{}}
+	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, DailyQueueResetTime: "04:00", Language: "中文", ArchiveSlot: 1, Switches: defaultSwitches(), Admins: []string{}, Blacklist: []string{}}
 }
 func defaultStyle() map[string]any {
 	return map[string]any{"bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409", "text_color": "#eaf6ff", "queue_font_size": 50, "queue_font_weight": "700", "queue_font_style": "normal", "queue_font_family": "Microsoft YaHei, Noto Sans SC, PingFang SC, sans-serif", "queue_letter_spacing": 0, "queue_word_spacing": 0, "queue_line_height": "1.20", "queue_item_gap": 10, "queue_text_align": "left", "queue_text_opacity": 100, "queue_item_padding_x": 14, "queue_item_padding_y": 8, "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)", "text_stroke_color": "#000000", "text_stroke_enabled": true, "auto_scroll": false, "show_sequence": false}
@@ -308,6 +310,8 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 		m.cfg.Switches = defaultSwitches()
 	}
 	m.cfg.Admins = append([]string{}, current.Admins...)
+	m.cfg.SuperAdmins = append([]string{}, current.SuperAdmins...)
+	m.cfg.Guards = append([]string{}, current.Guards...)
 	m.cfg.Blacklist = append([]string{}, current.Blacklist...)
 	if len(body) > maxLegacyBytes {
 		return m, errors.New("legacy import exceeds 12 MiB")
@@ -418,6 +422,21 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 					if v, ok := mj["admins"]; ok {
 						m.cfg.Admins = stringList(v)
 					}
+					if v, ok := mj["jianzhang"]; ok {
+						m.cfg.Guards = stringList(v)
+					}
+					if v, ok := mj["daily_queue_limit"]; ok {
+						m.cfg.DailyQueueLimit = number(v, 0)
+					}
+					if v, ok := mj["daily_queue_reset_time"]; ok {
+						m.cfg.DailyQueueResetTime = str(v)
+					}
+					if v, ok := mj["daily_queue_period"]; ok {
+						m.dailyPeriod = str(v)
+					}
+					if v, ok := mj["daily_queue_counts"]; ok {
+						m.dailyCounts = parseLegacyDailyCounts(v)
+					}
 					if v, ok := ui["language"]; ok {
 						m.cfg.Language = str(v)
 					}
@@ -432,6 +451,12 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 						applyLegacySwitches(&m.cfg, switches)
 					}
 					if x := mget(obj, "quanxian"); len(x) > 0 {
+						if v, ok := x["super_admin"]; ok {
+							m.cfg.SuperAdmins = stringList(v)
+						}
+						if v, ok := x["jianzhang"]; ok {
+							m.cfg.Guards = stringList(v)
+						}
 						if admins := stringList(x["admin"]); len(admins) > 0 {
 							m.cfg.Admins = admins
 						}
@@ -439,22 +464,29 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 							m.cfg.Blacklist = blacklist
 						}
 					}
-					m.preview.Mapped = append(m.preview.Mapped, "平台直播间/Cookie/启用状态", "队列上限与管理员", "语言与存档槽位", "已支持的功能开关")
-					m.preview.Warnings = append(m.preview.Warnings, "礼物特权、每日限额、回调、第三方平台及部分复杂权限仅保留原始备份，尚不参与 Go 业务")
+					m.preview.Mapped = append(m.preview.Mapped, "平台直播间/Cookie/启用状态", "队列上限、每日排队次数/重置时间/计数", "管理员/超管/舰长身份与黑名单", "语言与存档槽位", "已支持的功能开关")
+					m.preview.Warnings = append(m.preview.Warnings, "礼物积分资格、回调、第三方平台仅保留原始备份；旧版每日用户计数的纯数字 UID 暂映射到 B站 UID，抖音跨平台旧计数无法可靠转换")
 				case "quanxian.yaml":
 					obj, e := parseYAML(b)
 					if e != nil {
 						return m, fmt.Errorf("quanxian.yaml: %w", e)
 					}
-					if len(m.cfg.Admins) == 0 {
-						for _, key := range []string{"admins", "guanliyuan", "admin"} {
-							if x := stringList(obj[key]); len(x) > 0 {
-								m.cfg.Admins = x
-								break
-							}
-						}
+					if _, ok := obj["admin"]; ok {
+						m.cfg.Admins = stringList(obj["admin"])
 					}
-					m.preview.Mapped = append(m.preview.Mapped, "权限文件（管理员列表）")
+					if _, ok := obj["admins"]; ok {
+						m.cfg.Admins = stringList(obj["admins"])
+					}
+					if _, ok := obj["guanliyuan"]; ok {
+						m.cfg.Admins = stringList(obj["guanliyuan"])
+					}
+					if v, ok := obj["super_admin"]; ok {
+						m.cfg.SuperAdmins = stringList(v)
+					}
+					if v, ok := obj["jianzhang"]; ok {
+						m.cfg.Guards = stringList(v)
+					}
+					m.preview.Mapped = append(m.preview.Mapped, "权限文件（管理员/最高管理员/舰长）")
 					if blacklist := stringList(obj["blacklist"]); len(blacklist) > 0 {
 						m.cfg.Blacklist = blacklist
 					}
@@ -465,7 +497,7 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 					}
 					applyLegacySwitches(&m.cfg, obj)
 					m.preview.Mapped = append(m.preview.Mapped, "功能开关：总排队/官服/B服/超级/米服/取消/修改")
-					m.preview.Warnings = append(m.preview.Warnings, "舰长插队、房管权限等开关仍为部分兼容")
+					m.preview.Mapped = append(m.preview.Mapped, "舰长插队/房管操作开关")
 				case "style.json", "appearance.json":
 					obj := map[string]any{}
 					if e := json.Unmarshal(b, &obj); e != nil {
@@ -488,7 +520,7 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 					}
 					m.preview.Mapped = append(m.preview.Mapped, "黑名单")
 				case "queue_archive_state.json":
-					m.preview.Warnings = append(m.preview.Warnings, "队列存档元数据已保留；多个槽位的完整切换尚未迁移")
+					m.preview.Mapped = append(m.preview.Mapped, "排队存档状态（槽位由配置决定）")
 				}
 			}
 		}
@@ -538,6 +570,9 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 	m.cfg = cfg
 	m.preview.QueueCount = len(m.queue)
 	m.preview.BlacklistCount = len(m.cfg.Blacklist)
+	if len(m.dailyCounts) > 0 && m.dailyPeriod == "" {
+		m.preview.Warnings = append(m.preview.Warnings, "旧版每日计数缺少日期周期，不会写入新版以避免错误封禁")
+	}
 	if m.cfg.Command == "" {
 		m.cfg.Command = "排队"
 	}
@@ -555,9 +590,50 @@ func applyLegacySwitches(c *Config, flags map[string]any) {
 	for _, item := range []struct {
 		key  string
 		dest *bool
-	}{{"paidui", &s.Paidui}, {"guanfu_paidui", &s.Guanfu}, {"bfu_paidui", &s.Bfu}, {"chaoji_paidui", &s.Chaoji}, {"mifu_paidui", &s.Mifu}, {"quxiao_paidui", &s.Cancel}, {"xiugai_paidui", &s.Modify}} {
+	}{{"paidui", &s.Paidui}, {"guanfu_paidui", &s.Guanfu}, {"bfu_paidui", &s.Bfu}, {"chaoji_paidui", &s.Chaoji}, {"mifu_paidui", &s.Mifu}, {"quxiao_paidui", &s.Cancel}, {"xiugai_paidui", &s.Modify}, {"jianzhang_chadui", &s.GuardInsert}, {"fangguan_op", &s.RoomAdminOperator}} {
 		if value, ok := flags[item.key]; ok {
 			*item.dest = truth(value)
 		}
 	}
+}
+
+// Historic counts are stored as an array of "uid=count" pairs (or a mapping).
+// IDs are conservatively attributed to Bilibili; unknown identities remain in
+// original backup instead of being treated as trusted cross-platform IDs.
+func parseLegacyDailyCounts(input any) map[string]int {
+	out := map[string]int{}
+	switch v := input.(type) {
+	case string:
+		var parsed any
+		if json.Unmarshal([]byte(v), &parsed) == nil {
+			return parseLegacyDailyCounts(parsed)
+		}
+	case []any:
+		for _, x := range v {
+			parts := strings.SplitN(str(x), "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			n, err := strconv.Atoi(parts[1])
+			if err != nil || n <= 0 || n > 99999 {
+				continue
+			}
+			id := strings.TrimSpace(parts[0])
+			if id == "" {
+				continue
+			}
+			if _, err := strconv.ParseInt(id, 10, 64); err == nil {
+				out["bilibili:"+id] = n
+			}
+		}
+	case map[string]any:
+		for id, value := range v {
+			if _, err := strconv.ParseInt(id, 10, 64); err == nil {
+				if count := number(value, 0); count > 0 && count < 100000 {
+					out["bilibili:"+id] = count
+				}
+			}
+		}
+	}
+	return out
 }

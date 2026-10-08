@@ -32,3 +32,15 @@ func TestBiliPacket(t *testing.T) {
 		t.Fatalf("%v %d", err, found)
 	}
 }
+
+func TestBiliMessageVerifiedRoleFields(t *testing.T) {
+	raw := []byte(`{"cmd":"DANMU_MSG","info":[[],"排队",[1452,"房管昵称",1],[6,"粉丝团","","",0,0,0,0,0,0,3]]}`)
+	event, ok := biliMessage(raw)
+	if !ok || !event.IsRoomAdmin || event.GuardLevel != 3 || event.IsAnchor {
+		t.Fatalf("role mapping %+v %t", event, ok)
+	}
+	plain, ok := biliMessage([]byte(`{"cmd":"DANMU_MSG","info":[[],"排队",[88,"guest",0]]}`))
+	if !ok || plain.IsRoomAdmin || plain.GuardLevel != 0 || plain.IsAnchor {
+		t.Fatalf("unexpected privileges %+v %t", plain, ok)
+	}
+}
