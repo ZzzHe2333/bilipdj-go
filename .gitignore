@@ -1,0 +1,7 @@
+/data/
+/dist/
+/.env
+*.exe
+*.zip
+*.sha256
+.DS_Store

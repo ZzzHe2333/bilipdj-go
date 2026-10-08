@@ -1,0 +1,18 @@
+services:
+  bilipdj-go:
+    build: .
+    restart: unless-stopped
+    init: true
+    read_only: true
+    environment:
+      # Set a long random token before Docker admin actions can work.
+      BILIPDJ_ADMIN_TOKEN: ${BILIPDJ_ADMIN_TOKEN:?Set BILIPDJ_ADMIN_TOKEN in .env}
+    ports:
+      - "127.0.0.1:9816:9816"
+    volumes:
+      - bilipdj-data:/data
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  bilipdj-data:
