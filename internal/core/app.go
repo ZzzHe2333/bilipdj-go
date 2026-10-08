@@ -38,6 +38,7 @@ type Config struct {
 	Blacklist           []string       `json:"blacklist"`
 	Language            string         `json:"language"`
 	ArchiveSlot         int            `json:"archive_slot"`
+	GiftQueue           *GiftSettings  `json:"gift_queue,omitempty"`
 	Switches            *QueueSwitches `json:"switches,omitempty"`
 }
 
@@ -59,6 +60,22 @@ func defaultSwitches() *QueueSwitches {
 	return &QueueSwitches{Paidui: true, Guanfu: true, Bfu: true, Chaoji: true, Mifu: true, Cancel: true, Modify: true, GuardInsert: false, RoomAdminOperator: false}
 }
 
+// GiftSettings follows the supported original myjs gift queue settings.
+// Battery eligibility uses a local verified price catalog, not untrusted prices.
+type GiftSettings struct {
+	Enabled       bool     `json:"enabled"`
+	Names         []string `json:"names"`
+	MinBatteries  int      `json:"min_batteries"`
+	AllowMultiple bool     `json:"allow_multiple"`
+	SlotsPerGift  int      `json:"slots_per_gift"`
+	InsertRank    int      `json:"insert_rank"`
+	GiftOnly      bool     `json:"gift_only"`
+}
+
+func defaultGiftSettings() *GiftSettings {
+	return &GiftSettings{Names: []string{}, SlotsPerGift: 1, InsertRank: 1}
+}
+
 type QueueItem struct {
 	Mode     string    `json:"mode,omitempty"`
 	Key      string    `json:"key"`
@@ -75,6 +92,9 @@ type persisted struct {
 	Slots       map[string][]QueueItem `json:"slots,omitempty"`
 	DailyPeriod string                 `json:"daily_period,omitempty"`
 	DailyCounts map[string]int         `json:"daily_counts,omitempty"`
+	GiftCredits map[string]int         `json:"gift_credits,omitempty"`
+	GiftUsed    map[string]bool        `json:"gift_used,omitempty"`
+	GiftSeen    []string               `json:"gift_seen,omitempty"`
 	Style       map[string]any         `json:"style,omitempty"`
 	Appearance  map[string]any         `json:"appearance,omitempty"`
 }
@@ -89,6 +109,10 @@ type App struct {
 	slots       map[string][]QueueItem
 	dailyPeriod string
 	dailyCounts map[string]int
+	giftCredits map[string]int
+	giftUsed    map[string]bool
+	giftSeen    []string
+	giftLast    *live.Event
 	style       map[string]any
 	appearance  map[string]any
 	messages    []live.Event
@@ -102,7 +126,7 @@ type App struct {
 }
 
 func New(dataDir, version, repo string) *App {
-	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
 	raw, e := os.ReadFile(a.dataPath)
 	if e == nil {
@@ -112,6 +136,16 @@ func New(dataDir, version, repo string) *App {
 			a.dailyPeriod = p.DailyPeriod
 			if p.DailyCounts != nil {
 				a.dailyCounts = p.DailyCounts
+			}
+			if p.GiftCredits != nil {
+				a.giftCredits = p.GiftCredits
+			}
+			if p.GiftUsed != nil {
+				a.giftUsed = p.GiftUsed
+			}
+			a.giftSeen = p.GiftSeen
+			if a.config.GiftQueue == nil {
+				a.config.GiftQueue = defaultGiftSettings()
 			}
 			if a.config.Switches == nil {
 				a.config.Switches = defaultSwitches()
@@ -155,7 +189,7 @@ func New(dataDir, version, repo string) *App {
 }
 func (a *App) saveLocked() error {
 	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
-	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, Style: a.style, Appearance: a.appearance}, "", "  ")
+	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}
@@ -227,11 +261,15 @@ func (a *App) OnDanmu(e live.Event) {
 	}
 	e.Username = strings.TrimSpace(e.Username)
 	e.Content = strings.TrimSpace(e.Content)
-	if e.Username == "" || e.Content == "" {
+	if e.Username == "" || (e.Content == "" && e.Kind != "gift") {
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if e.Kind == "gift" && e.Platform == "bilibili" && e.Gift != nil {
+		a.processGiftLocked(e)
+		return
+	}
 	a.messages = append(a.messages, e)
 	if len(a.messages) > 150 {
 		a.messages = append([]live.Event{}, a.messages[len(a.messages)-150:]...)
@@ -335,6 +373,17 @@ func cleanConfig(c Config) (Config, error) {
 	if c.Switches == nil {
 		c.Switches = defaultSwitches()
 	}
+	if c.GiftQueue == nil {
+		c.GiftQueue = defaultGiftSettings()
+	}
+	if c.GiftQueue.MinBatteries < 0 || c.GiftQueue.MinBatteries > 10000000 || c.GiftQueue.SlotsPerGift < 1 || c.GiftQueue.SlotsPerGift > 100 || c.GiftQueue.InsertRank < 0 || c.GiftQueue.InsertRank > 10000 || len(c.GiftQueue.Names) > 100 {
+		return c, errors.New("礼物资格设置超出范围")
+	}
+	for _, name := range c.GiftQueue.Names {
+		if len([]rune(name)) > 80 {
+			return c, errors.New("礼物名过长")
+		}
+	}
 	if len(c.Blacklist) > 5000 || len(c.Admins) > 1000 || len(c.SuperAdmins) > 1000 || len(c.Guards) > 1000 {
 		return c, errors.New("黑名单或管理员数量超过上限")
 	}
@@ -387,6 +436,15 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
 		send(w, 200, map[string]any{"version": a.version, "platforms": a.statuses, "queue_size": len(a.queue)})
+	})
+	mux.HandleFunc("GET /api/gifts/state", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		send(w, 200, map[string]any{"settings": a.config.GiftQueue, "active_credits": len(a.giftCredits), "used_users": len(a.giftUsed), "last_event": a.giftLast})
 	})
 	mux.HandleFunc("GET /api/queue/state", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()

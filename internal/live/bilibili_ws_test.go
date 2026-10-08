@@ -246,9 +246,9 @@ func TestBiliDiscoverySignedPreferred(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(raw)), Header: make(http.Header), Request: req}, nil
 	})}
 	b := Bilibili{Client: client}
-	id, anchorUID, key, hosts, cookie, err := b.discover(context.Background(), "123", "")
-	if err != nil || id != 998 || anchorUID != 12345 || key != "opaque" || len(hosts) != 1 || hosts[0].WSSPort != 2245 || !strings.Contains(cookie, "buvid3=id123") {
-		t.Fatalf("%d %q %+v %v", id, key, hosts, err)
+	d, err := b.discover(context.Background(), "123", "")
+	if err != nil || d.roomID != 998 || d.anchorUID != 12345 || d.token != "opaque" || len(d.hosts) != 1 || d.hosts[0].WSSPort != 2245 || !strings.Contains(d.cookie, "buvid3=id123") {
+		t.Fatalf("%+v %v", d, err)
 	}
 }
 
@@ -257,7 +257,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestBiliAuthPayloadIncludesModernClientFields(t *testing.T) {
-	body, err := biliAuthPayload(998, "temporary-token", "SESSDATA=x; buvid3=client-abc")
+	body, err := biliAuthPayload(998, 0, "temporary-token", "SESSDATA=x; buvid3=client-abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,5 +325,66 @@ func TestBiliWSUpgradeSendsSessionCookie(t *testing.T) {
 	}
 	if err := <-result; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBiliAuthenticatedUIDSameSession(t *testing.T) {
+	cookie := "SESSDATA=login; DedeUserID=91234; buvid3=device-id"
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("Cookie"); got != cookie {
+			t.Fatalf("session cookie changed: %q", got)
+		}
+		raw := ""
+		switch req.URL.Path {
+		case "/room/v1/Room/room_init":
+			raw = `{"code":0,"data":{"room_id":998,"uid":123}}`
+		case "/x/web-interface/nav":
+			raw = `{"code":0,"data":{"isLogin":true,"mid":91234,"wbi_img":{"img_url":"https://i/abcdefghijklmnopqrstuvwxyz012345.png","sub_url":"https://i/ABCDEFGHIJKLMNOPQRSTUVWXYZ012345.jpg"}}}`
+		case "/xlive/web-room/v1/index/getDanmuInfo":
+			raw = `{"code":0,"data":{"token":"opaque","host_list":[{"host":"zj-cn-live-comet.chat.bilibili.com","wss_port":2245,"port":2243}]}}`
+		default:
+			t.Fatalf("unexpected endpoint %s", req.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(raw)), Header: make(http.Header), Request: req}, nil
+	})}
+	d, err := (Bilibili{Client: client}).discover(context.Background(), "998", cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.authUID != 91234 || !d.loginConfirmed {
+		t.Fatalf("authenticated session lost: %+v", d)
+	}
+	body, err := biliAuthPayload(d.roomID, d.authUID, d.token, d.cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a map[string]any
+	_ = json.Unmarshal(body, &a)
+	if a["uid"] != float64(91234) || a["key"] != "opaque" || a["buvid"] != "device-id" {
+		t.Fatalf("wrong auth profile: %v", a)
+	}
+}
+
+func TestBiliStaleCookieDoesNotImpersonateUser(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		raw := ""
+		switch req.URL.Path {
+		case "/room/v1/Room/room_init":
+			raw = `{"code":0,"data":{"room_id":1,"uid":2}}`
+		case "/x/web-interface/nav":
+			raw = `{"code":0,"data":{"isLogin":false,"mid":0,"wbi_img":{"img_url":"https://i/abcdefghijklmnopqrstuvwxyz012345.png","sub_url":"https://i/ABCDEFGHIJKLMNOPQRSTUVWXYZ012345.jpg"}}}`
+		case "/xlive/web-room/v1/index/getDanmuInfo":
+			raw = `{"code":0,"data":{"token":"s","host_list":[{"host":"a.chat.bilibili.com","wss_port":2245}]}}`
+		default:
+			t.Fatalf("unexpected endpoint %s", req.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(raw)), Header: make(http.Header), Request: req}, nil
+	})}
+	d, err := (Bilibili{Client: client}).discover(context.Background(), "1", "SESSDATA=stale; DedeUserID=999; buvid3=device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.authUID != 0 || d.loginConfirmed {
+		t.Fatalf("stale cookie accepted: %+v", d)
 	}
 }

@@ -6,7 +6,20 @@ import (
 	"time"
 )
 
+// Gift is a normalized trusted Bilibili live gift event. It is emitted only
+// from the authenticated Bilibili stream, never from a client API request.
+type Gift struct {
+	EventID  string `json:"event_id,omitempty"`
+	Name     string `json:"name"`
+	Count    int    `json:"count"`
+	CoinType string `json:"coin_type,omitempty"`
+	GiftID   int64  `json:"gift_id,omitempty"`
+	GuardBuy bool   `json:"guard_buy,omitempty"`
+}
+
 type Event struct {
+	Kind        string    `json:"kind,omitempty"`
+	Gift        *Gift     `json:"gift,omitempty"`
 	Platform    string    `json:"platform"`
 	UserID      string    `json:"user_id"`
 	Username    string    `json:"username"`

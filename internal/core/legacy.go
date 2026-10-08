@@ -39,7 +39,7 @@ type legacyMigration struct {
 }
 
 func defaultConfig() Config {
-	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, DailyQueueResetTime: "04:00", Language: "中文", ArchiveSlot: 1, Switches: defaultSwitches(), Admins: []string{}, Blacklist: []string{}}
+	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, DailyQueueResetTime: "04:00", Language: "中文", ArchiveSlot: 1, GiftQueue: defaultGiftSettings(), Switches: defaultSwitches(), Admins: []string{}, Blacklist: []string{}}
 }
 func defaultStyle() map[string]any {
 	return map[string]any{"bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409", "text_color": "#eaf6ff", "queue_font_size": 50, "queue_font_weight": "700", "queue_font_style": "normal", "queue_font_family": "Microsoft YaHei, Noto Sans SC, PingFang SC, sans-serif", "queue_letter_spacing": 0, "queue_word_spacing": 0, "queue_line_height": "1.20", "queue_item_gap": 10, "queue_text_align": "left", "queue_text_opacity": 100, "queue_item_padding_x": 14, "queue_item_padding_y": 8, "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)", "text_stroke_color": "#000000", "text_stroke_enabled": true, "auto_scroll": false, "show_sequence": false}
@@ -303,6 +303,13 @@ func queueCSV(data []byte) ([]QueueItem, error) {
 func parseLegacy(name string, body []byte, current Config) (legacyMigration, error) {
 	m := legacyMigration{cfg: current, slots: map[string][]QueueItem{}, preview: LegacyPreview{Files: []string{}, Mapped: []string{}, Warnings: []string{}, SlotCounts: map[string]int{}}}
 	// Preview must never change the live configuration through shared pointers.
+	if current.GiftQueue != nil {
+		gs := *current.GiftQueue
+		gs.Names = append([]string{}, current.GiftQueue.Names...)
+		m.cfg.GiftQueue = &gs
+	} else {
+		m.cfg.GiftQueue = defaultGiftSettings()
+	}
 	if current.Switches != nil {
 		v := *current.Switches
 		m.cfg.Switches = &v
@@ -425,6 +432,27 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 					if v, ok := mj["jianzhang"]; ok {
 						m.cfg.Guards = stringList(v)
 					}
+					if v, ok := mj["gift_queue_enabled"]; ok {
+						m.cfg.GiftQueue.Enabled = truth(v)
+					}
+					if v, ok := mj["gift_queue_names"]; ok {
+						m.cfg.GiftQueue.Names = stringList(v)
+					}
+					if v, ok := mj["gift_queue_min_batteries"]; ok {
+						m.cfg.GiftQueue.MinBatteries = number(v, 0)
+					}
+					if v, ok := mj["gift_queue_allow_multiple"]; ok {
+						m.cfg.GiftQueue.AllowMultiple = truth(v)
+					}
+					if v, ok := mj["gift_queue_slots_per_gift"]; ok {
+						m.cfg.GiftQueue.SlotsPerGift = number(v, 1)
+					}
+					if v, ok := mj["gift_queue_insert_rank"]; ok {
+						m.cfg.GiftQueue.InsertRank = number(v, 1)
+					}
+					if v, ok := mj["gift_queue_only"]; ok {
+						m.cfg.GiftQueue.GiftOnly = truth(v)
+					}
 					if v, ok := mj["daily_queue_limit"]; ok {
 						m.cfg.DailyQueueLimit = number(v, 0)
 					}
@@ -464,8 +492,8 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 							m.cfg.Blacklist = blacklist
 						}
 					}
-					m.preview.Mapped = append(m.preview.Mapped, "平台直播间/Cookie/启用状态", "队列上限、每日排队次数/重置时间/计数", "管理员/超管/舰长身份与黑名单", "语言与存档槽位", "已支持的功能开关")
-					m.preview.Warnings = append(m.preview.Warnings, "礼物积分资格、回调、第三方平台仅保留原始备份；旧版每日用户计数的纯数字 UID 暂映射到 B站 UID，抖音跨平台旧计数无法可靠转换")
+					m.preview.Mapped = append(m.preview.Mapped, "平台直播间/Cookie/启用状态", "队列上限、每日排队次数/重置时间/计数", "管理员/超管/舰长身份与黑名单", "语言与存档槽位", "已支持的功能开关", "礼物资格设置（不自动导入旧版已使用/已消费记录）")
+					m.preview.Warnings = append(m.preview.Warnings, "旧版礼物已使用 UID / 待消费积分不自动转移（避免跨版本错误重复授权）；回调和第三方平台保留原始备份；旧版每日用户计数的纯数字 UID 暂映射到 B站 UID")
 				case "quanxian.yaml":
 					obj, e := parseYAML(b)
 					if e != nil {

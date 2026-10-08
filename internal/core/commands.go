@@ -229,6 +229,12 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 			}
 		}
 	}
+	if input == "插队" && a.config.AutoQueue && (a.config.Switches == nil || a.config.Switches.Paidui) && a.useGiftCreditLocked(e, index) {
+		return true
+	}
+	if a.config.GiftQueue != nil && a.config.GiftQueue.GiftOnly && !operator && index < 0 {
+		return false
+	}
 	if !a.config.AutoQueue || (a.config.Switches != nil && !a.config.Switches.Paidui) {
 		return false
 	}

@@ -76,7 +76,7 @@ func (a *App) legacyRoutes(mux *http.ServeMux) {
 			send(w, 500, map[string]string{"error": "保存原始配置失败: " + e.Error()})
 			return
 		}
-		before := persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, Style: a.style, Appearance: a.appearance}
+		before := persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}
 		nextSlots := map[string][]QueueItem{}
 		for key, items := range a.slots {
 			nextSlots[key] = append([]QueueItem{}, items...)

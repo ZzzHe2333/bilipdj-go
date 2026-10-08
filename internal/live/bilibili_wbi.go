@@ -19,7 +19,9 @@ var wbiTable = []int{46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35
 type biliNav struct {
 	Code int `json:"code"`
 	Data struct {
-		WbiImg struct {
+		Mid     int64 `json:"mid"`
+		IsLogin bool  `json:"isLogin"`
+		WbiImg  struct {
 			ImgURL string `json:"img_url"`
 			SubURL string `json:"sub_url"`
 		} `json:"wbi_img"`
@@ -71,18 +73,21 @@ func wbiSign(params url.Values, key string, at time.Time) url.Values {
 	v.Set("w_rid", hex.EncodeToString(digest[:]))
 	return v
 }
-func (b Bilibili) signedDanmuURL(ctx context.Context, room int64, cookie string) (string, error) {
+func (b Bilibili) signedDanmuURL(ctx context.Context, room int64, cookie string) (string, biliNav, error) {
 	var nav biliNav
 	err := biliGet(ctx, b.client(), "https://api.bilibili.com/x/web-interface/nav", cookie, &nav)
 	if err != nil {
-		return "", fmt.Errorf("WBI 导航数据失败: %w", err)
+		return "", nav, fmt.Errorf("WBI 导航数据失败: %w", err)
+	}
+	if nav.Code != 0 {
+		return "", nav, fmt.Errorf("B站登录导航响应 code=%d", nav.Code)
 	}
 	key, err := wbiKey(nav.Data.WbiImg.ImgURL, nav.Data.WbiImg.SubURL)
 	if err != nil {
-		return "", err
+		return "", nav, err
 	}
 	params := url.Values{"id": {strconv.FormatInt(room, 10)}, "type": {"0"}, "web_location": {"444.8"}}
-	return fmt.Sprintf("%s/xlive/web-room/v1/index/getDanmuInfo?%s", biliAPI, wbiSign(params, key, time.Now()).Encode()), nil
+	return fmt.Sprintf("%s/xlive/web-room/v1/index/getDanmuInfo?%s", biliAPI, wbiSign(params, key, time.Now()).Encode()), nav, nil
 }
 func (b Bilibili) discoveryCookie(ctx context.Context, original string) string {
 	if biliCookieValue(original, "buvid3") != "" {

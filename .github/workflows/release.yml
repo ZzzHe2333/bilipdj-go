@@ -37,7 +37,7 @@ jobs:
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          RELEASE_TAG: v0.4.0
+          RELEASE_TAG: v0.5.0
         run: |
           mkdir -p dist/package
           EXT=""; [[ "$GOOS" == windows ]] && EXT=.exe
