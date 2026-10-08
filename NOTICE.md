@@ -21,3 +21,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+`web/qrcode.js` is an offline browser bundle of the QRCode matrix library
+shipped with `qrcode-terminal` (Apache-2.0), which contains code derived from
+Kazuhiko Arase's QRCode for JavaScript (MIT). Copyright (c) 2009 Kazuhiko Arase.
+See `third_party/qrcode-terminal-APACHE-2.0.txt` and
+`third_party/qrcode-generator-MIT.txt`. No external QR rendering service is used.

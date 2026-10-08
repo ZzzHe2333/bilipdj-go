@@ -103,31 +103,40 @@ type Event struct {
 	Data any    `json:"data"`
 }
 type App struct {
-	mu          sync.RWMutex
-	config      Config
-	queue       []QueueItem
-	slots       map[string][]QueueItem
-	dailyPeriod string
-	dailyCounts map[string]int
-	giftCredits map[string]int
-	giftUsed    map[string]bool
-	giftSeen    []string
-	giftLast    *live.Event
-	style       map[string]any
-	appearance  map[string]any
-	messages    []live.Event
-	statuses    map[string]live.Status
-	subscribers map[chan Event]struct{}
-	workers     map[string]context.CancelFunc
-	dataPath    string
-	version     string
-	repo        string
-	updater     *update.Service
+	mu            sync.RWMutex
+	config        Config
+	queue         []QueueItem
+	slots         map[string][]QueueItem
+	dailyPeriod   string
+	dailyCounts   map[string]int
+	giftCredits   map[string]int
+	giftUsed      map[string]bool
+	giftSeen      []string
+	giftLast      *live.Event
+	style         map[string]any
+	appearance    map[string]any
+	messages      []live.Event
+	statuses      map[string]live.Status
+	subscribers   map[chan Event]struct{}
+	workers       map[string]context.CancelFunc
+	dataPath      string
+	version       string
+	repo          string
+	updater       *update.Service
+	qrMu          sync.Mutex
+	qrSession     biliQRSession
+	qrClient      *http.Client
+	qrGenerateURL string
+	qrPollURL     string
+	qrNavURL      string
 }
 
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
+	a.qrGenerateURL = biliQRGenerateEndpoint
+	a.qrPollURL = biliQRPollEndpoint
+	a.qrNavURL = biliNavEndpoint
 	raw, e := os.ReadFile(a.dataPath)
 	if e == nil {
 		var p persisted
@@ -654,6 +663,8 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		}
 		send(w, 200, result)
 	})
+	a.qrRoutes(mux)
+	a.wsRoutes(mux)
 	a.legacyRoutes(mux)
 	mux.HandleFunc("GET /control", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusTemporaryRedirect) })
 	mux.HandleFunc("GET /index", func(w http.ResponseWriter, r *http.Request) {
