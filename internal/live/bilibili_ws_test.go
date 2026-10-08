@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -135,7 +136,7 @@ func TestWSSUpgradeMaskingAndFragmentation(t *testing.T) {
 		}
 		serverErr <- nil
 	}()
-	ws, err := upgradeBiliWS(client, "bili.test", 2245)
+	ws, err := upgradeBiliWS(client, "bili.test", 2245, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,8 +246,8 @@ func TestBiliDiscoverySignedPreferred(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(raw)), Header: make(http.Header), Request: req}, nil
 	})}
 	b := Bilibili{Client: client}
-	id, key, hosts, err := b.discover(context.Background(), "123", "")
-	if err != nil || id != 998 || key != "opaque" || len(hosts) != 1 || hosts[0].WSSPort != 2245 {
+	id, key, hosts, cookie, err := b.discover(context.Background(), "123", "")
+	if err != nil || id != 998 || key != "opaque" || len(hosts) != 1 || hosts[0].WSSPort != 2245 || !strings.Contains(cookie, "buvid3=id123") {
 		t.Fatalf("%d %q %+v %v", id, key, hosts, err)
 	}
 }
@@ -254,3 +255,75 @@ func TestBiliDiscoverySignedPreferred(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestBiliAuthPayloadIncludesModernClientFields(t *testing.T) {
+	body, err := biliAuthPayload(998, "temporary-token", "SESSDATA=x; buvid3=client-abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(body, &values); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{"uid": float64(0), "roomid": float64(998), "protover": float64(2), "buvid": "client-abc", "support_ack": true, "platform": "web", "type": float64(2), "key": "temporary-token"} {
+		if values[key] != want {
+			t.Fatalf("%s got %v want %v", key, values[key], want)
+		}
+	}
+	if id, ok := values["queue_uuid"].(string); !ok || len(id) != 8 {
+		t.Fatalf("queue_uuid %v", values["queue_uuid"])
+	}
+	if strings.Contains(string(body), "SESSDATA") {
+		t.Fatal("auth leaked unrelated session cookie")
+	}
+}
+
+func TestBiliRejectsUntrustedDanmuHost(t *testing.T) {
+	out := biliCandidates([]biliHost{{Host: "evil.example", Port: 2243, WSSPort: 2245}, {Host: "a.chat.bilibili.com", Port: 2243, WSSPort: 2245}})
+	if len(out) != 2 || out[0].host != "a.chat.bilibili.com" {
+		t.Fatalf("unsafe server in candidate list %+v", out)
+	}
+}
+
+func TestBiliWebSocketCloseExplainsCode(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	ws := &biliWS{Conn: left, input: bufio.NewReader(left)}
+	go func() { _, _ = right.Write([]byte{0x88, 0x04, 0x03, 0xF0, 'n', 'o'}) }()
+	_, err := ws.ReadPacket()
+	if err == nil || !strings.Contains(err.Error(), "1008") || !strings.Contains(err.Error(), "no") {
+		t.Fatalf("expected informative close reason, got %v", err)
+	}
+}
+
+func TestBiliWSUpgradeSendsSessionCookie(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	result := make(chan error, 1)
+	go func() {
+		req, err := http.ReadRequest(bufio.NewReader(server))
+		if err != nil {
+			result <- err
+			return
+		}
+		if req.Header.Get("Cookie") != "buvid3=client-123; SESSDATA=testing" {
+			result <- fmt.Errorf("missing session cookie")
+			return
+		}
+		if req.Header.Get("Origin") != "https://live.bilibili.com" {
+			result <- fmt.Errorf("missing live origin")
+			return
+		}
+		h := sha1.Sum([]byte(req.Header.Get("Sec-WebSocket-Key") + wsGUID))
+		_, err = fmt.Fprintf(server, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", base64.StdEncoding.EncodeToString(h[:]))
+		result <- err
+	}()
+	if _, err := upgradeBiliWS(client, "a.chat.bilibili.com", 2245, "buvid3=client-123; SESSDATA=testing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}

@@ -171,3 +171,58 @@ func TestLegacyDefaults(t *testing.T) {
 		t.Fatal("legacy style defaults mismatch")
 	}
 }
+
+func TestLegacyTenSlotArchiveAndSwitchImport(t *testing.T) {
+	buf := new(bytes.Buffer)
+	z := zip.NewWriter(buf)
+	for name, raw := range map[string]string{
+		"core/config.yaml":                  "platform: bilibili\nbilibili:\n  roomid: 3049445\nqueue_archive:\n  active_slot: 2\n",
+		"core/kaiguan.yaml":                 "paidui: true\nguanfu_paidui: false\nquxiao_paidui: false\n",
+		"core/cd/queue_archive_slot_1.csv":  "seq,id,content,last_operation_at\n1,Alice,slot one,2026-10-08\n",
+		"core/cd/queue_archive_slot_2.csv":  "seq,id,content,last_operation_at\n1,Bob,slot two,2026-10-08\n",
+		"core/cd/queue_archive_slot_10.csv": "seq,id,content,last_operation_at\n1,Cara,slot ten,2026-10-08\n",
+	} {
+		w, e := z.Create(name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		_, _ = w.Write([]byte(raw))
+	}
+	if e := z.Close(); e != nil {
+		t.Fatal(e)
+	}
+	m, e := parseLegacy("backup.zip", buf.Bytes(), defaultConfig())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(m.slots) != 3 || len(m.slots["10"]) != 1 || len(m.queue) != 1 || m.queue[0].Username != "Bob" {
+		t.Fatalf("slots %+v current %+v", m.slots, m.queue)
+	}
+	if m.cfg.Switches.Guanfu || m.cfg.Switches.Cancel || !m.cfg.Switches.Paidui {
+		t.Fatalf("switches %+v", m.cfg.Switches)
+	}
+}
+
+func TestLegacyPreviewDoesNotMutateCurrentFlags(t *testing.T) {
+	original := defaultConfig()
+	zipBuffer := new(bytes.Buffer)
+	z := zip.NewWriter(zipBuffer)
+	w, err := z.Create("core/kaiguan.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.Write([]byte("guanfu_paidui: false\npaidui: false\n"))
+	if err = z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m, err := parseLegacy("settings.zip", zipBuffer.Bytes(), original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.cfg.Switches.Guanfu || m.cfg.Switches.Paidui {
+		t.Fatal("import flags missing")
+	}
+	if !original.Switches.Guanfu || !original.Switches.Paidui {
+		t.Fatal("PREVIEW mutated original flags!")
+	}
+}

@@ -4,7 +4,7 @@ createApp({setup(){
  const page=ref('dashboard'), status=ref({}), statuses=computed(()=>status.value.platforms||{});
  const config=ref({bilibili:{room:'',cookie:'',enabled:false},douyin:{room:'',cookie:'',enabled:false},auto_queue:true,command:'排队'});
  const legacyFile=ref(null), legacyPreview=ref(null), blacklistText=ref(''), adminsText=ref('');
- const cookieConfigured=ref({bilibili:false,douyin:false}), messages=ref([]),queue=ref([]),filter=ref('all');
+ const cookieConfigured=ref({bilibili:false,douyin:false}), messages=ref([]),queue=ref([]),filter=ref('all'),slotInfo=ref({active_slot:1,slots:{}}),selectedSlot=ref(1);
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null);
  const platforms=[{id:'bilibili',name:'Bilibili 直播',placeholder:'直播间号码，如 6'},{id:'douyin',name:'抖音直播',placeholder:'live.douyin.com/xxxx'}];
  const filters=[{id:'all',name:'全部'},{id:'bilibili',name:'B站'},{id:'douyin',name:'抖音'}];
@@ -19,11 +19,14 @@ createApp({setup(){
  const resp=await fetch(path,{...options,headers});let data={};try{data=await resp.json()}catch{}
  if(!resp.ok){if(resp.status===403){const token=window.prompt('管理接口需要管理员 Token（本机直接运行通常无需输入）：');if(token){sessionStorage.setItem('pdj-token',token);return api(path,options)}}throw Error(data.error||`HTTP ${resp.status}`)}return data;
  }
- async function refresh(){try{const [s,q,m]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages')]);status.value=s;queue.value=q;messages.value=m}catch(e){message(e.message,'error')}}
+ async function refresh(){try{const [s,q,m,slots]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages'),api('/api/queue/slots')]);status.value=s;queue.value=q;messages.value=m;slotInfo.value=slots;selectedSlot.value=slots.active_slot}catch(e){message(e.message,'error')}}
  async function loadAppearance(){try{const appearance=await api('/api/appearance');const mode=appearance.mode==='light'?'light':'dark';const colors=appearance[mode]||{};const root=document.documentElement;const mapping={'--bg':'background','--panel':'surface','--panel2':'surface_alt','--line':'border','--text':'text','--dim':'muted','--accent':'accent'};for(const [css,k] of Object.entries(mapping)){const value=colors[k];if(typeof value==='string' && /^#[0-9a-fA-F]{3,8}$/.test(value))root.style.setProperty(css,value)}root.style.colorScheme=mode}catch{}}
- async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
+ async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
  async function saveConfig(){busy.value=true;try{config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()])}catch(e){message(e.message,'error')}finally{busy.value=false}}
  async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(body)})}catch(e){message(e.message,'error')}}
+ async function changeSlot(){try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
+ async function moveQueue(q,index){await queueAction({action:'move',key:q.key,index:index})}
+ async function editQueue(q){const note=window.prompt('修改 '+q.username+' 的备注',q.note||'');if(note!==null)await queueAction({action:'edit',key:q.key,note})}
  async function addQueue(){if(!newName.value)return;await queueAction({action:'add',name:newName.value});newName.value=''}
  function removeQueue(key){queueAction({action:'remove',key})}
  function clearQueue(){if(window.confirm('确认清空当前全部排队？'))queueAction({action:'clear'})}
@@ -41,5 +44,5 @@ createApp({setup(){
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
  onMounted(()=>{refresh();loadConfig();loadAppearance();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
  onUnmounted(()=>{if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller)});
- return {page,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,checkUpdate,downloadUpdate,legacyFile,legacyPreview,blacklistText,adminsText,selectLegacyFile,legacyAction};
+ return {page,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,legacyFile,legacyPreview,blacklistText,adminsText,selectLegacyFile,legacyAction};
 }}).mount('#app');

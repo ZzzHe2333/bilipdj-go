@@ -34,8 +34,27 @@ type Config struct {
 	Blacklist   []string       `json:"blacklist"`
 	Language    string         `json:"language"`
 	ArchiveSlot int            `json:"archive_slot"`
+	Switches    *QueueSwitches `json:"switches,omitempty"`
 }
+
+// QueueSwitches maps the supported legacy kaiguan.yaml flags.
+// The pointer differentiates an old saved state from disabled settings.
+type QueueSwitches struct {
+	Paidui bool `json:"paidui"`
+	Guanfu bool `json:"guanfu_paidui"`
+	Bfu    bool `json:"bfu_paidui"`
+	Chaoji bool `json:"chaoji_paidui"`
+	Mifu   bool `json:"mifu_paidui"`
+	Cancel bool `json:"quxiao_paidui"`
+	Modify bool `json:"xiugai_paidui"`
+}
+
+func defaultSwitches() *QueueSwitches {
+	return &QueueSwitches{Paidui: true, Guanfu: true, Bfu: true, Chaoji: true, Mifu: true, Cancel: true, Modify: true}
+}
+
 type QueueItem struct {
+	Mode     string    `json:"mode,omitempty"`
 	Key      string    `json:"key"`
 	Platform string    `json:"platform"`
 	UserID   string    `json:"user_id"`
@@ -44,10 +63,11 @@ type QueueItem struct {
 	At       time.Time `json:"at"`
 }
 type persisted struct {
-	Config     Config         `json:"config"`
-	Queue      []QueueItem    `json:"queue"`
-	Style      map[string]any `json:"style,omitempty"`
-	Appearance map[string]any `json:"appearance,omitempty"`
+	Config     Config                 `json:"config"`
+	Queue      []QueueItem            `json:"queue"`
+	Slots      map[string][]QueueItem `json:"slots,omitempty"`
+	Style      map[string]any         `json:"style,omitempty"`
+	Appearance map[string]any         `json:"appearance,omitempty"`
 }
 type Event struct {
 	Type string `json:"type"`
@@ -57,6 +77,7 @@ type App struct {
 	mu          sync.RWMutex
 	config      Config
 	queue       []QueueItem
+	slots       map[string][]QueueItem
 	style       map[string]any
 	appearance  map[string]any
 	messages    []live.Event
@@ -70,13 +91,16 @@ type App struct {
 }
 
 func New(dataDir, version, repo string) *App {
-	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
 	raw, e := os.ReadFile(a.dataPath)
 	if e == nil {
 		var p persisted
 		if json.Unmarshal(raw, &p) == nil {
 			a.config = p.Config
+			if a.config.Switches == nil {
+				a.config.Switches = defaultSwitches()
+			}
 			if a.config.MaxQueue == 0 {
 				a.config.MaxQueue = 100
 			}
@@ -86,7 +110,15 @@ func New(dataDir, version, repo string) *App {
 			if a.config.ArchiveSlot == 0 {
 				a.config.ArchiveSlot = 1
 			}
+			if p.Slots != nil {
+				for n, entries := range p.Slots {
+					a.slots[n] = append([]QueueItem{}, entries...)
+				}
+			}
 			a.queue = p.Queue
+			if len(a.slots) > 0 {
+				a.queue = append([]QueueItem{}, a.slots[slotKey(a.config.ArchiveSlot)]...)
+			}
 			if p.Style != nil {
 				a.style = p.Style
 			}
@@ -104,7 +136,8 @@ func New(dataDir, version, repo string) *App {
 	return a
 }
 func (a *App) saveLocked() error {
-	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Style: a.style, Appearance: a.appearance}, "", "  ")
+	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
+	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}
@@ -133,6 +166,28 @@ func (a *App) saveLocked() error {
 		return e
 	}
 	return os.Rename(name, a.dataPath)
+}
+func slotKey(n int) string {
+	if n < 1 {
+		n = 1
+	}
+	return fmt.Sprint(n)
+}
+func (a *App) switchSlotLocked(n int) {
+	if n == a.config.ArchiveSlot {
+		return
+	}
+	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
+	a.queue = append([]QueueItem{}, a.slots[slotKey(n)]...)
+	a.config.ArchiveSlot = n
+}
+func (a *App) slotCountsLocked() map[string]int {
+	counts := map[string]int{}
+	for i := 1; i <= 10; i++ {
+		counts[slotKey(i)] = len(a.slots[slotKey(i)])
+	}
+	counts[slotKey(a.config.ArchiveSlot)] = len(a.queue)
+	return counts
 }
 func (a *App) publishLocked(e Event) {
 	for ch := range a.subscribers {
@@ -164,41 +219,18 @@ func (a *App) OnDanmu(e live.Event) {
 		a.messages = append([]live.Event{}, a.messages[len(a.messages)-150:]...)
 	}
 	a.publishLocked(Event{Type: "danmu", Data: e})
-	if !a.config.AutoQueue {
-		return
-	}
 	for _, s := range a.config.Blacklist {
 		if strings.EqualFold(strings.TrimSpace(s), e.Username) || s == e.UserID {
 			return
 		}
 	}
-	cmd := strings.TrimSpace(a.config.Command)
-	if cmd == "" {
-		cmd = "排队"
-	}
-	lower := strings.TrimSpace(e.Content)
-	if lower != "排队" && lower != cmd && !strings.HasPrefix(lower, cmd+" ") && !strings.HasPrefix(lower, cmd+"：") && !strings.HasPrefix(lower, cmd+":") {
-		return
-	}
-	note := strings.TrimSpace(strings.TrimPrefix(lower, cmd))
-	note = strings.TrimLeft(note, " ：:")
-	key := e.Platform + ":" + e.UserID
-	if e.UserID == "" {
-		key = e.Platform + ":" + e.Username
-	}
-	for _, item := range a.queue {
-		if item.Key == key {
-			return
+	if a.processDanmuCommandLocked(e) {
+		if err := a.saveLocked(); err != nil {
+			log.Printf("queue persist: %v", err)
 		}
+		a.publishLocked(Event{Type: "queue", Data: a.queue})
 	}
-	if a.config.MaxQueue > 0 && len(a.queue) >= a.config.MaxQueue {
-		return
-	}
-	a.queue = append(a.queue, QueueItem{Key: key, Platform: e.Platform, UserID: e.UserID, Username: e.Username, Note: note, At: e.Time})
-	if err := a.saveLocked(); err != nil {
-		log.Printf("queue persist: %v", err)
-	}
-	a.publishLocked(Event{Type: "queue", Data: a.queue})
+
 }
 func (a *App) Start() { a.mu.RLock(); c := a.config; a.mu.RUnlock(); a.apply(c) }
 func (a *App) apply(cfg Config) {
@@ -267,11 +299,14 @@ func cleanConfig(c Config) (Config, error) {
 	if c.MaxQueue < 0 || c.MaxQueue > 10000 {
 		return c, errors.New("排队人数上限必须为 0 至 10000")
 	}
-	if c.ArchiveSlot < 0 || c.ArchiveSlot > 100 {
-		return c, errors.New("存档槽位必须为 1 至 100")
+	if c.ArchiveSlot < 0 || c.ArchiveSlot > 10 {
+		return c, errors.New("存档槽位必须为 1 至 10")
 	}
 	if c.ArchiveSlot == 0 {
 		c.ArchiveSlot = 1
+	}
+	if c.Switches == nil {
+		c.Switches = defaultSwitches()
 	}
 	if len(c.Blacklist) > 5000 || len(c.Admins) > 1000 {
 		return c, errors.New("黑名单或管理员数量超过上限")
@@ -331,6 +366,33 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		defer a.mu.RUnlock()
 		send(w, 200, map[string]any{"entries": a.queue, "count": len(a.queue), "active_slot": a.config.ArchiveSlot})
 	})
+	mux.HandleFunc("GET /api/queue/slots", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		send(w, 200, map[string]any{"active_slot": a.config.ArchiveSlot, "slots": a.slotCountsLocked()})
+	})
+	mux.HandleFunc("POST /api/queue/slots", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		var payload struct {
+			Slot int `json:"slot"`
+		}
+		if e := decode(r, &payload); e != nil || payload.Slot < 1 || payload.Slot > 10 {
+			send(w, 400, map[string]string{"error": "存档槽位必须为 1 至 10"})
+			return
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.switchSlotLocked(payload.Slot)
+		if e := a.saveLocked(); e != nil {
+			send(w, 500, map[string]string{"error": e.Error()})
+			return
+		}
+		a.publishLocked(Event{Type: "queue", Data: a.queue})
+		send(w, 200, map[string]any{"active_slot": a.config.ArchiveSlot, "slots": a.slotCountsLocked(), "entries": a.queue})
+	})
 	mux.HandleFunc("GET /api/platforms/active", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
@@ -375,6 +437,9 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		a.mu.Lock()
+		if cfg.ArchiveSlot != a.config.ArchiveSlot {
+			a.switchSlotLocked(cfg.ArchiveSlot)
+		}
 		a.config = cfg
 		e = a.saveLocked()
 		a.mu.Unlock()

@@ -69,14 +69,14 @@ type biliWS struct {
 	mu    sync.Mutex
 }
 
-func dialBiliWS(ctx context.Context, host string, port int) (*biliWS, error) {
+func dialBiliWS(ctx context.Context, host string, port int, cookie string) (*biliWS, error) {
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	raw, err := (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 	_ = raw.SetDeadline(time.Now().Add(10 * time.Second))
-	ws, err := upgradeBiliWS(raw, host, port)
+	ws, err := upgradeBiliWS(raw, host, port, cookie)
 	_ = raw.SetDeadline(time.Time{})
 	if err != nil {
 		raw.Close()
@@ -85,7 +85,7 @@ func dialBiliWS(ctx context.Context, host string, port int) (*biliWS, error) {
 	return ws, nil
 }
 
-func upgradeBiliWS(raw net.Conn, host string, port int) (*biliWS, error) {
+func upgradeBiliWS(raw net.Conn, host string, port int, cookie string) (*biliWS, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
@@ -93,7 +93,12 @@ func upgradeBiliWS(raw net.Conn, host string, port int) (*biliWS, error) {
 	key := base64.StdEncoding.EncodeToString(nonce[:])
 	h := sha1.Sum([]byte(key + wsGUID))
 	expected := base64.StdEncoding.EncodeToString(h[:])
-	request := fmt.Sprintf("GET /sub HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://live.bilibili.com\r\nUser-Agent: Mozilla/5.0\r\n\r\n", net.JoinHostPort(host, fmt.Sprintf("%d", port)), key)
+	request := fmt.Sprintf("GET /sub HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://live.bilibili.com\r\nReferer: https://live.bilibili.com/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36\r\n", net.JoinHostPort(host, fmt.Sprintf("%d", port)), key)
+	// Cookie values originate in configuration and must never inject headers.
+	if cookie != "" && !strings.ContainsAny(cookie, "\r\n") {
+		request += "Cookie: " + cookie + "\r\n"
+	}
+	request += "\r\n"
 	if _, err := io.WriteString(raw, request); err != nil {
 		return nil, err
 	}
@@ -191,7 +196,22 @@ func (b *biliWS) ReadPacket() ([]byte, error) {
 		}
 		switch op {
 		case 8:
-			return nil, io.EOF
+			if len(body) >= 2 {
+				code := binary.BigEndian.Uint16(body[:2])
+				reason := string(body[2:])
+				if len(reason) > 160 {
+					reason = reason[:160]
+				}
+				// Close reason is untrusted; do not echo token/cookie or control chars.
+				reason = strings.Map(func(r rune) rune {
+					if r < 32 || r == 127 {
+						return -1
+					}
+					return r
+				}, reason)
+				return nil, fmt.Errorf("WebSocket 服务端关闭：code=%d reason=%q", code, reason)
+			}
+			return nil, errors.New("WebSocket 服务端关闭（未提供关闭码）")
 		case 9:
 			if err := b.writeFrame(10, body); err != nil {
 				return nil, err

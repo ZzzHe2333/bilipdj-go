@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,19 +88,19 @@ func biliRoomID(input string) (int64, error) {
 	}
 	return n, nil
 }
-func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, string, []biliHost, error) {
+func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, string, []biliHost, string, error) {
 	id, e := biliRoomID(room)
 	if e != nil {
-		return 0, "", nil, e
+		return 0, "", nil, "", e
 	}
 	httpClient := b.client()
 	cookie = b.discoveryCookie(ctx, cookie)
 	var init biliRoom
 	if e = biliGet(ctx, httpClient, fmt.Sprintf("%s/room/v1/Room/room_init?id=%d", biliAPI, id), cookie, &init); e != nil {
-		return 0, "", nil, e
+		return 0, "", nil, "", e
 	}
 	if init.Code != 0 || init.Data.RoomID <= 0 {
-		return 0, "", nil, fmt.Errorf("B站直播间解析失败 code=%d", init.Code)
+		return 0, "", nil, "", fmt.Errorf("B站直播间解析失败 code=%d", init.Code)
 	}
 	id = init.Data.RoomID
 	var errorsSeen []string
@@ -111,7 +113,7 @@ func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, str
 			if len(hosts) == 0 {
 				hosts = conf.Data.Fallback
 			}
-			return id, conf.Data.Token, hosts, nil
+			return id, conf.Data.Token, hosts, cookie, nil
 		}
 		errorsSeen = append(errorsSeen, fmt.Sprintf("signed getDanmuInfo code=%d err=%v", conf.Code, e))
 	} else {
@@ -132,12 +134,12 @@ func (b Bilibili) discover(ctx context.Context, room, cookie string) (int64, str
 				hosts = conf.Data.Fallback
 			}
 			if len(hosts) > 0 {
-				return id, conf.Data.Token, hosts, nil
+				return id, conf.Data.Token, hosts, cookie, nil
 			}
 		}
 		errorsSeen = append(errorsSeen, fmt.Sprintf("getDanmuInfo fallback code=%d err=%v", conf.Code, e))
 	}
-	return 0, "", nil, fmt.Errorf("B站认证 token/节点获取失败；请尝试填入有效的 B站 Cookie（含 buvid3）后重试；%s", strings.Join(errorsSeen, "; "))
+	return 0, "", nil, "", fmt.Errorf("B站认证 token/节点获取失败；请尝试填入有效的 B站 Cookie（含 buvid3）后重试；%s", strings.Join(errorsSeen, "; "))
 }
 func biliPacket(operation int, body []byte) []byte {
 	p := make([]byte, 16+len(body))
@@ -232,7 +234,7 @@ func biliCandidates(hosts []biliHost) []biliCandidate {
 			if ws {
 				port = h.WSSPort
 			}
-			if h.Host == "" || port <= 0 {
+			if !biliTrustedHost(h.Host) || port <= 0 || port > 65535 {
 				continue
 			}
 			id := fmt.Sprintf("%s:%d/%t", h.Host, port, ws)
@@ -246,9 +248,28 @@ func biliCandidates(hosts []biliHost) []biliCandidate {
 	return out
 }
 
-func dialBili(ctx context.Context, item biliCandidate) (biliStream, error) {
+func biliTrustedHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return strings.HasSuffix(host, ".chat.bilibili.com") && !strings.ContainsAny(host, "/:@\r\n ")
+}
+
+func biliAuthPayload(roomID int64, token, cookie string) ([]byte, error) {
+	var nonce [4]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]any{
+		"uid": 0, "roomid": roomID, "protover": 2,
+		"buvid":       biliCookieValue(cookie, "buvid3"),
+		"support_ack": true,
+		"queue_uuid":  hex.EncodeToString(nonce[:]), "scene": "",
+		"platform": "web", "type": 2, "key": token,
+	})
+}
+
+func dialBili(ctx context.Context, item biliCandidate, cookie string) (biliStream, error) {
 	if item.wss {
-		return dialBiliWS(ctx, item.host, item.port)
+		return dialBiliWS(ctx, item.host, item.port, cookie)
 	}
 	c, err := (&net.Dialer{Timeout: 8 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(item.host, strconv.Itoa(item.port)))
 	if err != nil {
@@ -293,7 +314,7 @@ func readBiliAuth(stream biliStream) error {
 
 func (b Bilibili) connect(ctx context.Context, room, cookie string, emit Emit, report Report) error {
 	report(Status{Platform: "bilibili", Connected: false, Message: "正在发现 B站弹幕服务器…", Since: time.Now()})
-	id, token, hosts, err := b.discover(ctx, room, cookie)
+	id, token, hosts, discoveryCookie, err := b.discover(ctx, room, cookie)
 	if err != nil {
 		return err
 	}
@@ -307,12 +328,16 @@ func (b Bilibili) connect(ctx context.Context, room, cookie string, emit Emit, r
 			transport = "WSS"
 		}
 		report(Status{Platform: "bilibili", Connected: false, Message: fmt.Sprintf("正在连接 B站 %s 节点 %s:%d", transport, item.host, item.port), Since: time.Now()})
-		stream, e := dialBili(ctx, item)
+		stream, e := dialBili(ctx, item, discoveryCookie)
 		if e != nil {
 			failures = append(failures, fmt.Sprintf("%s %s:%d: %v", transport, item.host, item.port, e))
 			continue
 		}
-		auth, _ := json.Marshal(map[string]any{"uid": 0, "roomid": id, "protover": 2, "platform": "web", "type": 2, "key": token})
+		auth, e := biliAuthPayload(id, token, discoveryCookie)
+		if e != nil {
+			stream.Close()
+			return e
+		}
 		e = runBiliStream(ctx, stream, auth, id, transport, emit, report)
 		stream.Close()
 		if ctx.Err() != nil {
@@ -326,8 +351,10 @@ func (b Bilibili) connect(ctx context.Context, room, cookie string, emit Emit, r
 			return e
 		}
 	}
-	if len(failures) > 4 {
-		failures = failures[:4]
+	// Report at least one failure from each transport, rather than hiding
+	// every TCP attempt behind the four WSS attempts.
+	if len(failures) > 8 {
+		failures = append(failures[:4], append([]string{"…其余节点省略…"}, failures[len(failures)-3:]...)...)
 	}
 	return fmt.Errorf("B站所有弹幕节点连接/鉴权失败: %s", strings.Join(failures, "; "))
 }

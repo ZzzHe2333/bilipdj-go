@@ -20,11 +20,12 @@ import (
 const maxLegacyBytes = 12 << 20
 
 type LegacyPreview struct {
-	Files          []string `json:"files"`
-	Mapped         []string `json:"mapped"`
-	Warnings       []string `json:"warnings"`
-	QueueCount     int      `json:"queue_count"`
-	BlacklistCount int      `json:"blacklist_count"`
+	Files          []string       `json:"files"`
+	Mapped         []string       `json:"mapped"`
+	Warnings       []string       `json:"warnings"`
+	QueueCount     int            `json:"queue_count"`
+	SlotCounts     map[string]int `json:"slot_counts,omitempty"`
+	BlacklistCount int            `json:"blacklist_count"`
 }
 type legacyMigration struct {
 	preview    LegacyPreview
@@ -32,10 +33,11 @@ type legacyMigration struct {
 	style      map[string]any
 	appearance map[string]any
 	queue      []QueueItem
+	slots      map[string][]QueueItem
 }
 
 func defaultConfig() Config {
-	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, Language: "中文", ArchiveSlot: 1, Admins: []string{}, Blacklist: []string{}}
+	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, Language: "中文", ArchiveSlot: 1, Switches: defaultSwitches(), Admins: []string{}, Blacklist: []string{}}
 }
 func defaultStyle() map[string]any {
 	return map[string]any{"bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409", "text_color": "#eaf6ff", "queue_font_size": 50, "queue_font_weight": "700", "queue_font_style": "normal", "queue_font_family": "Microsoft YaHei, Noto Sans SC, PingFang SC, sans-serif", "queue_letter_spacing": 0, "queue_word_spacing": 0, "queue_line_height": "1.20", "queue_item_gap": 10, "queue_text_align": "left", "queue_text_opacity": 100, "queue_item_padding_x": 14, "queue_item_padding_y": 8, "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)", "text_stroke_color": "#000000", "text_stroke_enabled": true, "auto_scroll": false, "show_sequence": false}
@@ -297,7 +299,16 @@ func queueCSV(data []byte) ([]QueueItem, error) {
 	return items, nil
 }
 func parseLegacy(name string, body []byte, current Config) (legacyMigration, error) {
-	m := legacyMigration{cfg: current, preview: LegacyPreview{Files: []string{}, Mapped: []string{}, Warnings: []string{}}}
+	m := legacyMigration{cfg: current, slots: map[string][]QueueItem{}, preview: LegacyPreview{Files: []string{}, Mapped: []string{}, Warnings: []string{}, SlotCounts: map[string]int{}}}
+	// Preview must never change the live configuration through shared pointers.
+	if current.Switches != nil {
+		v := *current.Switches
+		m.cfg.Switches = &v
+	} else {
+		m.cfg.Switches = defaultSwitches()
+	}
+	m.cfg.Admins = append([]string{}, current.Admins...)
+	m.cfg.Blacklist = append([]string{}, current.Blacklist...)
 	if len(body) > maxLegacyBytes {
 		return m, errors.New("legacy import exceeds 12 MiB")
 	}
@@ -414,10 +425,21 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 						m.cfg.ArchiveSlot = number(v, 1)
 					}
 					// Older configuration schema stores permissions and switches under config.yaml.
-					if v := mget(obj, "quanxian")["admins"]; v != nil && len(m.cfg.Admins) == 0 {
+					if v := mget(obj, "quanxian")["admin"]; v != nil && len(m.cfg.Admins) == 0 {
 						m.cfg.Admins = stringList(v)
 					}
-					m.preview.Mapped = append(m.preview.Mapped, "平台直播间/Cookie/启用状态", "队列上限与管理员", "语言与存档槽位")
+					if switches := mget(obj, "kaiguan"); len(switches) > 0 {
+						applyLegacySwitches(&m.cfg, switches)
+					}
+					if x := mget(obj, "quanxian"); len(x) > 0 {
+						if admins := stringList(x["admin"]); len(admins) > 0 {
+							m.cfg.Admins = admins
+						}
+						if blacklist := stringList(x["blacklist"]); len(blacklist) > 0 {
+							m.cfg.Blacklist = blacklist
+						}
+					}
+					m.preview.Mapped = append(m.preview.Mapped, "平台直播间/Cookie/启用状态", "队列上限与管理员", "语言与存档槽位", "已支持的功能开关")
 					m.preview.Warnings = append(m.preview.Warnings, "礼物特权、每日限额、回调、第三方平台及部分复杂权限仅保留原始备份，尚不参与 Go 业务")
 				case "quanxian.yaml":
 					obj, e := parseYAML(b)
@@ -433,11 +455,17 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 						}
 					}
 					m.preview.Mapped = append(m.preview.Mapped, "权限文件（管理员列表）")
+					if blacklist := stringList(obj["blacklist"]); len(blacklist) > 0 {
+						m.cfg.Blacklist = blacklist
+					}
 				case "kaiguan.yaml":
-					if _, e := parseYAML(b); e != nil {
+					obj, e := parseYAML(b)
+					if e != nil {
 						return m, fmt.Errorf("kaiguan.yaml: %w", e)
 					}
-					m.preview.Warnings = append(m.preview.Warnings, "kaiguan.yaml 已原样保存，但复杂功能开关尚未全部实现")
+					applyLegacySwitches(&m.cfg, obj)
+					m.preview.Mapped = append(m.preview.Mapped, "功能开关：总排队/官服/B服/超级/米服/取消/修改")
+					m.preview.Warnings = append(m.preview.Warnings, "舰长插队、房管权限等开关仍为部分兼容")
 				case "style.json", "appearance.json":
 					obj := map[string]any{}
 					if e := json.Unmarshal(b, &obj); e != nil {
@@ -465,32 +493,40 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 			}
 		}
 	}
-	// Queue archive CSV: prefer active slot, then the first recognized queue CSV.
-	var selected string
+	// Recognize all ten original queue_archive_slot_N.csv snapshots.
 	for _, n := range ordered {
-		low := strings.ToLower(n)
 		base := strings.ToLower(path.Base(n))
-		if strings.HasSuffix(base, ".csv") && base != "blacklist.csv" {
-			if strings.Contains(low, "/cd/") || strings.Contains(base, "queue") || strings.Contains(base, "paidui") || strings.Contains(base, "archive") {
-				if selected == "" {
-					selected = n
-				}
-				slot := strconv.Itoa(m.cfg.ArchiveSlot)
-				if strings.Contains(base, "_"+slot+".") || base == slot+".csv" {
-					selected = n
+		if !strings.HasSuffix(base, ".csv") || base == "blacklist.csv" {
+			continue
+		}
+		num := 0
+		for _, format := range []string{"queue_archive_slot_%d.csv", "cdang_%d.csv", "%d.csv"} {
+			for i := 1; i <= 10; i++ {
+				if base == fmt.Sprintf(format, i) {
+					num = i
 					break
 				}
 			}
+			if num > 0 {
+				break
+			}
+		}
+		if num == 0 {
+			continue
+		}
+		entries, err := queueCSV(docs[n])
+		if err != nil {
+			return m, fmt.Errorf("%s: %w", n, err)
+		}
+		m.slots[slotKey(num)] = entries
+		m.preview.Files = append(m.preview.Files, n)
+		m.preview.SlotCounts[slotKey(num)] = len(entries)
+		if num == m.cfg.ArchiveSlot {
+			m.queue = entries
 		}
 	}
-	if selected != "" {
-		q, e := queueCSV(docs[selected])
-		if e != nil {
-			return m, e
-		}
-		m.queue = q
-		m.preview.Files = append(m.preview.Files, selected)
-		m.preview.Mapped = append(m.preview.Mapped, "当前排队存档")
+	if len(m.slots) > 0 {
+		m.preview.Mapped = append(m.preview.Mapped, "10槽位排队 CSV 存档")
 	}
 	if len(m.preview.Files) == 0 {
 		return m, errors.New("ZIP 没有可识别的旧版配置文件")
@@ -509,4 +545,19 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 		return m, errors.New("too many blacklist entries")
 	}
 	return m, nil
+}
+
+func applyLegacySwitches(c *Config, flags map[string]any) {
+	if c.Switches == nil {
+		c.Switches = defaultSwitches()
+	}
+	s := c.Switches
+	for _, item := range []struct {
+		key  string
+		dest *bool
+	}{{"paidui", &s.Paidui}, {"guanfu_paidui", &s.Guanfu}, {"bfu_paidui", &s.Bfu}, {"chaoji_paidui", &s.Chaoji}, {"mifu_paidui", &s.Mifu}, {"quxiao_paidui", &s.Cancel}, {"xiugai_paidui", &s.Modify}} {
+		if value, ok := flags[item.key]; ok {
+			*item.dest = truth(value)
+		}
+	}
 }

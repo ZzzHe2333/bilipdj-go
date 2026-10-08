@@ -57,7 +57,7 @@ func (a *App) legacyRoutes(mux *http.ServeMux) {
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
 		}
-		oldRaw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Style: a.style, Appearance: a.appearance}, "", "  ")
+		oldRaw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, Style: a.style, Appearance: a.appearance}, "", "  ")
 		if e == nil {
 			e = writePrivate(filepath.Join(migrationDir, "previous-state-"+time.Now().UTC().Format("20060102T150405.000000000")+".json"), oldRaw)
 		}
@@ -76,8 +76,18 @@ func (a *App) legacyRoutes(mux *http.ServeMux) {
 			send(w, 500, map[string]string{"error": "保存原始配置失败: " + e.Error()})
 			return
 		}
-		before := persisted{Config: a.config, Queue: a.queue, Style: a.style, Appearance: a.appearance}
+		before := persisted{Config: a.config, Queue: a.queue, Slots: a.slots, Style: a.style, Appearance: a.appearance}
+		nextSlots := map[string][]QueueItem{}
+		for key, items := range a.slots {
+			nextSlots[key] = append([]QueueItem{}, items...)
+		}
+		a.slots = nextSlots
 		a.config = m.cfg
+		if len(m.slots) > 0 {
+			for key, items := range m.slots {
+				a.slots[key] = items
+			}
+		}
 		if m.queue != nil {
 			a.queue = m.queue
 		}
@@ -90,6 +100,7 @@ func (a *App) legacyRoutes(mux *http.ServeMux) {
 		e = a.saveLocked()
 		if e != nil {
 			a.config = before.Config
+			a.slots = before.Slots
 			a.queue = before.Queue
 			a.style = before.Style
 			a.appearance = before.Appearance
