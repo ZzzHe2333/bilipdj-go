@@ -35,7 +35,7 @@ type legacyMigration struct {
 }
 
 func defaultConfig() Config {
-	return Config{AutoQueue: true, Command: "排队", MaxQueue: 100, Language: "中文", ArchiveSlot: 1, Admins: []string{}, Blacklist: []string{}}
+	return Config{Bilibili: PlatformConfig{Room: "3049445"}, AutoQueue: true, Command: "排队", MaxQueue: 100, Language: "中文", ArchiveSlot: 1, Admins: []string{}, Blacklist: []string{}}
 }
 func defaultStyle() map[string]any {
 	return map[string]any{"bg1": "#0e2036", "bg2": "#060b14", "bg3": "#020409", "text_color": "#eaf6ff", "queue_font_size": 50, "queue_font_weight": "700", "queue_font_style": "normal", "queue_font_family": "Microsoft YaHei, Noto Sans SC, PingFang SC, sans-serif", "queue_letter_spacing": 0, "queue_word_spacing": 0, "queue_line_height": "1.20", "queue_item_gap": 10, "queue_text_align": "left", "queue_text_opacity": 100, "queue_item_padding_x": 14, "queue_item_padding_y": 8, "text_grad_start": "#f7f7f7", "text_grad_end": "rgba(255,255,255,0.6)", "text_stroke_color": "#000000", "text_stroke_enabled": true, "auto_scroll": false, "show_sequence": false}

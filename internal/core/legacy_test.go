@@ -161,3 +161,13 @@ func TestLegacyRejectMaliciousZip(t *testing.T) {
 		t.Fatal("accepted path traversal")
 	}
 }
+
+func TestLegacyDefaults(t *testing.T) {
+	c := defaultConfig()
+	if c.Bilibili.Room != "3049445" || c.Bilibili.Enabled || c.MaxQueue != 100 || c.ArchiveSlot != 1 || c.Language != "中文" {
+		t.Fatalf("legacy defaults mismatch: %+v", c)
+	}
+	if defaultStyle()["show_sequence"] != false || defaultAppearance()["mode"] != "dark" {
+		t.Fatal("legacy style defaults mismatch")
+	}
+}
