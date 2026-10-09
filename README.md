@@ -13,6 +13,7 @@
 - **旧版 `/ws` WebSocket 只读推送兼容**：推送 `PDJ_STATUS`、`QUEUE_UPDATE`、B站基础 `DANMU_MSG` 与抖音 `DOUYIN_DANMU`；**不允许 WebSocket 客户端执行管理指令**，不宣称所有旧第三方协议完全兼容。
 - **Web UI + OBS**：Vue 3 离线控制台 `http://127.0.0.1:9816/`，OBS `http://127.0.0.1:9816/overlay.html`（建议 800×600）。
 - **应用内自更新（v0.10.0）**：Web「软件更新」提供检查、官方/第三方加速下载、SHA-256 校验、确认安装并自动重启。临时更新助手在主程序退出后备份原 EXE/二进制并替换；新版启动异常时自动回滚。**仅经管理员主动确认触发安装**；Docker 必须重建或拉取镜像。
+- **内置 MCP（AI 工具接口）**：HTTP `/mcp` 与 `--mcp-stdio` 支持 AI 查询 B站/抖音监听状态、统一队列及 10 个槽位；写操作需独立 `BILIPDJ_MCP_WRITE_TOKEN`，默认只读。兼容传统和 2026 MCP 协议，详见 [MCP 接入指南](docs/MCP.md)。
 - **Docker / 原生运行**：无需 Python、Node 或外网前端 CDN。
 
 未实现：Python/JS 插件市场、原有 Tk 前端、礼物目录动态价格获取、WebDAV 存档。旧配置支持安全导入，并增加功能开关和最多 10 个原版排队 CSV 槽位读取；仍仅部分功能字段能直接生效；其余原始资料会被完整备份。这仍是新项目技术预览，不宣称原项目全量功能完全兼容。
@@ -85,6 +86,10 @@ GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 
 | `core/cd/*.csv` | 导入识别到的 1–10 号槽位 CSV（含第 5 列来源平台），并支持切换和重启恢复 |
 
 如果旧版设置散落在多个文件中，请将这些文件压缩成 ZIP 再导入；仅导入一个 `config.yaml` 不会自动读取同机其他旧版文件。导入前建议停止旧版后端，避免同时使用同一直播间和重复写入资料。
+
+## AI / MCP 接入
+
+正常运行程序后，即可由支持 MCP 的 AI 客户端连接 `http://127.0.0.1:9816/mcp`，或在本地 AI 客户端里将已安装的 `bilipdj-go` 二进制作为 `--mcp-stdio` 命令启动（仅连接现有服务，不创建第二份存档写入进程）。默认只允许本机读取，写操作必须设置 `BILIPDJ_MCP_WRITE_TOKEN` 并使用 Bearer 授权；Docker/远程读取可设置 `BILIPDJ_MCP_READ_TOKEN`。工具有状态、队列、槽位、近期弹幕，以及经授权的增加/修改/移动/删除/切换/清空。不要将 MCP 管理端口直接暴露在公网。详细接入配置：[docs/MCP.md](docs/MCP.md)。
 
 ## API 最小契约
 
