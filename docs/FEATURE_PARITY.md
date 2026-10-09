@@ -100,3 +100,17 @@
 | 性能 / 关于 | 保留更新/运行状态信息 | 独立 Windows 性能/关于页尚未移植 |
 
 新增 Go `logs.go` 与 `logs_test.go`，HTTP 最近日志读取仅允许已授权请求；SSE 日志经过敏感字段脱敏。`POST /api/queue` 新增 `insert` 动作，`index` 为从 0 开始的插入位置。离线测试包括过滤规则、队列插入和 Web 界面菜单浏览器渲染（模拟 API 数据）；不代替真实直播间验收。
+
+
+## v0.8.0 Windows 启动体验与首次配置引导
+
+| 功能 | Go v0.8.0 | 说明 |
+| --- | --- | --- |
+| Windows 启动黑色控制台 | 发行版以 GUI 子系统构建 | 不生成控制台窗口；手动编译需要 `-H=windowsgui` |
+| Windows 托盘常驻 | Win32 `Shell_NotifyIconW` | 通用应用图标，双击打开默认浏览器、右键可打开或退出；Windows 真机体验待验收 |
+| 启动自动打开管理界面 | 仅 Windows | 监听成功后调用 Windows `ShellExecuteW`，Linux/macOS/Docker 不自动打开网页 |
+| 首次使用向导 | Vue 分步模态窗口 | 首次全新安装可引导开启 B站/抖音、扫码登录、排队规则、确认保存，支持跳过 |
+| 完成状态跨重启保存 | `data/state.json:onboarding_completed` | 新安装显示一次，已配置旧版升级不被打断；可手动重新打开向导 |
+| Cookie 保护 | 保持原版 `/api/config` 行为 | 未输入新 Cookie 时沿用已保存 Cookie；扫码后只在官方确认时保存 |
+
+`POST /api/onboarding` 要求管理员权限且只接受 `completed=true`，不提供重置端点。客户端不能通过该接口修改平台 Cookie。新向导沿用 `POST /api/config` 的安全约束，沿用已有双平台队列和接入协议；**本轮未修改已经正常工作的 B站弹幕鉴权和扫码回调代码**。

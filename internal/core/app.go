@@ -87,50 +87,52 @@ type QueueItem struct {
 	Guard    bool      `json:"guard,omitempty"`
 }
 type persisted struct {
-	Config      Config                 `json:"config"`
-	Queue       []QueueItem            `json:"queue"`
-	Slots       map[string][]QueueItem `json:"slots,omitempty"`
-	DailyPeriod string                 `json:"daily_period,omitempty"`
-	DailyCounts map[string]int         `json:"daily_counts,omitempty"`
-	GiftCredits map[string]int         `json:"gift_credits,omitempty"`
-	GiftUsed    map[string]bool        `json:"gift_used,omitempty"`
-	GiftSeen    []string               `json:"gift_seen,omitempty"`
-	Style       map[string]any         `json:"style,omitempty"`
-	Appearance  map[string]any         `json:"appearance,omitempty"`
+	OnboardingCompleted bool                   `json:"onboarding_completed"`
+	Config              Config                 `json:"config"`
+	Queue               []QueueItem            `json:"queue"`
+	Slots               map[string][]QueueItem `json:"slots,omitempty"`
+	DailyPeriod         string                 `json:"daily_period,omitempty"`
+	DailyCounts         map[string]int         `json:"daily_counts,omitempty"`
+	GiftCredits         map[string]int         `json:"gift_credits,omitempty"`
+	GiftUsed            map[string]bool        `json:"gift_used,omitempty"`
+	GiftSeen            []string               `json:"gift_seen,omitempty"`
+	Style               map[string]any         `json:"style,omitempty"`
+	Appearance          map[string]any         `json:"appearance,omitempty"`
 }
 type Event struct {
 	Type string `json:"type"`
 	Data any    `json:"data"`
 }
 type App struct {
-	mu            sync.RWMutex
-	config        Config
-	queue         []QueueItem
-	slots         map[string][]QueueItem
-	dailyPeriod   string
-	dailyCounts   map[string]int
-	giftCredits   map[string]int
-	giftUsed      map[string]bool
-	giftSeen      []string
-	giftLast      *live.Event
-	style         map[string]any
-	appearance    map[string]any
-	messages      []live.Event
-	logs          []LogEntry
-	logSequence   uint64
-	statuses      map[string]live.Status
-	subscribers   map[chan Event]struct{}
-	workers       map[string]context.CancelFunc
-	dataPath      string
-	version       string
-	repo          string
-	updater       *update.Service
-	qrMu          sync.Mutex
-	qrSession     biliQRSession
-	qrClient      *http.Client
-	qrGenerateURL string
-	qrPollURL     string
-	qrNavURL      string
+	mu                  sync.RWMutex
+	config              Config
+	queue               []QueueItem
+	slots               map[string][]QueueItem
+	dailyPeriod         string
+	dailyCounts         map[string]int
+	giftCredits         map[string]int
+	giftUsed            map[string]bool
+	giftSeen            []string
+	giftLast            *live.Event
+	style               map[string]any
+	appearance          map[string]any
+	messages            []live.Event
+	logs                []LogEntry
+	logSequence         uint64
+	statuses            map[string]live.Status
+	subscribers         map[chan Event]struct{}
+	workers             map[string]context.CancelFunc
+	dataPath            string
+	version             string
+	onboardingCompleted bool
+	repo                string
+	updater             *update.Service
+	qrMu                sync.Mutex
+	qrSession           biliQRSession
+	qrClient            *http.Client
+	qrGenerateURL       string
+	qrPollURL           string
+	qrNavURL            string
 }
 
 func New(dataDir, version, repo string) *App {
@@ -144,6 +146,13 @@ func New(dataDir, version, repo string) *App {
 	if e == nil {
 		var p persisted
 		if json.Unmarshal(raw, &p) == nil {
+			// Existing installations predate the wizard. Do not interrupt their
+			// configured workflow on upgrade; they can reopen it from the sidebar.
+			// New installs (no state.json) show the wizard exactly once.
+			var keys map[string]json.RawMessage
+			_ = json.Unmarshal(raw, &keys)
+			_, hasWizardField := keys["onboarding_completed"]
+			a.onboardingCompleted = p.OnboardingCompleted || !hasWizardField
 			a.config = p.Config
 			a.dailyPeriod = p.DailyPeriod
 			if p.DailyCounts != nil {
@@ -201,7 +210,7 @@ func New(dataDir, version, repo string) *App {
 }
 func (a *App) saveLocked() error {
 	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
-	raw, e := json.MarshalIndent(persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
+	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}
@@ -465,6 +474,41 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		logs := append([]LogEntry{}, a.logs...)
 		a.mu.RUnlock()
 		send(w, 200, logs)
+	})
+	mux.HandleFunc("GET /api/onboarding", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		a.mu.RLock()
+		completed := a.onboardingCompleted
+		a.mu.RUnlock()
+		send(w, 200, map[string]bool{"completed": completed})
+	})
+	mux.HandleFunc("POST /api/onboarding", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		var req struct {
+			Completed bool `json:"completed"`
+		}
+		if err := decode(r, &req); err != nil || !req.Completed {
+			send(w, 400, map[string]string{"error": "仅支持完成或跳过引导"})
+			return
+		}
+		a.mu.Lock()
+		before := a.onboardingCompleted
+		a.onboardingCompleted = true
+		if err := a.saveLocked(); err != nil {
+			a.onboardingCompleted = before
+			a.mu.Unlock()
+			send(w, 500, map[string]string{"error": "保存首次使用状态失败"})
+			return
+		}
+		a.appendLogLocked("INFO", "system", "首次使用引导已完成或跳过")
+		a.mu.Unlock()
+		send(w, 200, map[string]bool{"completed": true})
 	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()

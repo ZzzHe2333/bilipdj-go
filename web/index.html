@@ -9,8 +9,8 @@
 <button :class="['nav',{selected:page==='permissions'}]" @click="page='permissions'"><span>♙</span> 权限管理</button>
 <button :class="['nav',{selected:page==='overlay'}]" @click="page='overlay'"><span>▣</span> OBS 展示设置</button>
 <button :class="['nav',{selected:page==='update'}]" @click="page='update'"><span>↻</span> 软件更新</button>
-<div class="sidebar-bottom"><span class="dot" :class="streamReady?'online':'offline'"></span> {{streamReady?'实时事件流已连接':'事件流连接中'}}<p>v{{status.version || '0.1.0'}} · Go + Vue 3</p></div></aside>
-<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><a href="/overlay.html" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
+<div class="sidebar-bottom"><button type="button" class="wizard-reopen" @click="openWizard">新手配置引导 ↗</button><span class="dot" :class="streamReady?'online':'offline'"></span> {{streamReady?'实时事件流已连接':'事件流连接中'}}<p>v{{status.version || '0.1.0'}} · Go + Vue 3</p></div></aside>
+<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/overlay.html" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
 <main>
 <div v-if="notice" class="notice" :class="noticeLevel">{{notice}} <button @click="notice=''">×</button></div>
 <template v-if="page==='logs'">
@@ -85,5 +85,21 @@
 <button class="btn primary" :disabled="busy" @click="saveObsStyle">保存 OBS 样式</button></article><section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">在 OBS 中添加浏览器源，地址填写 http://127.0.0.1:9816/overlay.html。本版本是 Web 透明展示，不提供原版 Tk 桌面悬浮窗或系统级窗口置顶能力。</p></section>
 </template>
 <template v-else><div class="page-title"><div><p class="eyebrow">RELEASE MANAGEMENT</p><h1>检查软件更新</h1><p class="muted">从 bilipdj-go GitHub Releases 获取新版本，只下载经过 SHA-256 校验的更新包。</p></div></div><article class="panel updates"><span class="meta">当前版本</span><h2>v{{status.version||'0.1.0'}}</h2><button class="btn primary" :disabled="busy" @click="checkUpdate">{{busy?'正在检查…':'检查更新'}}</button><div v-if="release" class="release"><b>最新版本：{{release.version}}</b><p>目标发行包：{{release.asset || '暂无当前平台构建'}}</p><p>{{release.update_available?'发现可用更新。':release.has_sha256?'当前版本或不支持自动判断新旧版本。':'尚无可验证的发行资源。'}}</p><button v-if="release.update_available" class="btn" @click="downloadUpdate" :disabled="busy">下载并校验更新包</button><p class="tip">更新包只会暂存到 data/updates。替换并重启需要手动操作；Docker 应拉取新镜像。</p></div></article></template>
-</main><footer>BiliPDJ Go · 本地优先 · 仅供直播管理使用</footer></div></div>
+</main><footer>BiliPDJ Go · 本地优先 · 仅供直播管理使用</footer></div>
+<div v-if="wizardOpen" class="wizard-backdrop" role="presentation">
+ <section class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+  <div class="wizard-top"><div><p class="eyebrow">FIRST RUN SETUP</p><h2 id="wizard-title">BiliPDJ Go · 首次使用引导</h2></div><button class="btn small" type="button" @click="closeWizard" :disabled="wizardBusy">跳过引导</button></div>
+  <div class="wizard-alert" v-if="wizardError" role="alert">{{wizardError}}</div>
+  <div class="wizard-progress" aria-label="设置进度"><span v-for="step in 4" :key="step" :class="{active:wizardStep>=step-1}"></span></div>
+  <div class="wizard-body" v-if="wizardStep===0"><div class="wizard-intro">▣</div><h3>欢迎使用 BiliPDJ Go</h3><p>只需几步即可配置直播间、弹幕排队与基础规则。B站和抖音可同时开启，共用同一份排队列表。</p><p class="tip">也可以直接跳过，稍后在「平台与规则」或左下角的「新手配置引导」继续设置。</p></div>
+  <div class="wizard-body" v-else-if="wizardStep===1"><p class="eyebrow">STEP 1 · LIVE CHANNELS</p><h3>选择直播平台</h3><p class="tip">只开启需要监听的平台。直播间信息和 Cookie 仅保存在本机 Go 服务配置中。</p>
+   <div class="wizard-platform"><label class="check"><input type="checkbox" v-model="config.bilibili.enabled"> <strong>启用 B站弹幕监听</strong></label><label>B站直播间号<input v-model.trim="config.bilibili.room" placeholder="例如 3049445" autocomplete="off"></label><p class="tip">可以使用 B站扫码登录；如果已有有效 Cookie，也可以保持当前登录状态。</p><button type="button" class="btn small" @click="startQR" :disabled="wizardBusy">{{cookieConfigured.bilibili?'重新扫码 B站':'扫码登录 B站'}}</button><span v-if="cookieConfigured.bilibili" class="wizard-ok">本地已配置 B站 Cookie</span><div v-if="qrImage" class="wizard-qr"><img :src="qrImage" alt="B站扫码登录二维码"><p>{{qrState}}</p></div><p v-else-if="qrState" class="tip">{{qrState}}</p></div>
+   <div class="wizard-platform"><label class="check"><input type="checkbox" v-model="config.douyin.enabled"> <strong>启用抖音弹幕监听</strong></label><label>抖音直播间链接 / 房间号<input v-model.trim="config.douyin.room" placeholder="例如 https://live.douyin.com/xxxx" autocomplete="off"></label><p class="tip">抖音如需登录 Cookie，可以稍后到平台配置页填写。</p></div>
+  </div>
+  <div class="wizard-body" v-else-if="wizardStep===2"><p class="eyebrow">STEP 2 · QUEUE SETTINGS</p><h3>设置排队规则</h3><label class="check"><input type="checkbox" v-model="config.auto_queue"> 开启自动排队</label><label>弹幕排队关键词<input v-model.trim="config.command" maxlength="16" placeholder="排队"></label><label>最大排队人数<input type="number" min="1" max="10000" v-model.number="config.max_queue"></label><label>每天排队次数上限（0 表示无限制）<input type="number" min="0" max="999" v-model.number="config.daily_queue_limit"></label><p class="tip">B站与抖音使用同一份队列；系统支持 10 个独立存档槽位，之后可在「排队管理」中切换。</p></div>
+  <div class="wizard-body" v-else><p class="eyebrow">STEP 3 · CONFIRM</p><h3>确认并开始使用</h3><div class="wizard-summary"><p><b>B站：</b>{{config.bilibili.enabled?'启用 · '+(config.bilibili.room||'尚未填写直播间'):'暂不开启'}}</p><p><b>抖音：</b>{{config.douyin.enabled?'启用 · '+(config.douyin.room||'尚未填写直播间'):'暂不开启'}}</p><p><b>自动排队：</b>{{config.auto_queue?'开启':'关闭'}}</p><p><b>排队关键词：</b>{{config.command||'排队'}}</p><p><b>最大队列：</b>{{config.max_queue}} 人</p></div><p class="tip">点击「保存并完成」后，配置会写入本地，并启动已开启的平台监听。已有 Cookie 不会因向导而清除。</p></div>
+  <div class="wizard-footer"><button type="button" class="btn" v-if="wizardStep>0" @click="wizardStep--" :disabled="wizardBusy">上一步</button><span class="wizard-spacer"></span><button type="button" class="btn primary" v-if="wizardStep<3" @click="wizardStep++" :disabled="wizardBusy">{{wizardStep===0?'开始配置':'下一步'}}</button><button type="button" class="btn primary" v-else @click="finishWizard" :disabled="wizardBusy">{{wizardBusy?'保存中…':'保存并完成'}}</button></div>
+ </section>
+</div>
+</div><!-- #app -->
 <script src="/vue.global.js"></script><script src="/qrcode.js"></script><script src="/app.js"></script></body></html>

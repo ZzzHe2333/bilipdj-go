@@ -55,7 +55,9 @@ jobs:
         run: |
           mkdir -p dist/package
           EXT=""; [[ "$GOOS" == windows ]] && EXT=.exe
-          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${RELEASE_TAG#v}" -o "dist/package/bilipdj-go${EXT}" .
+          LDFLAGS="-s -w -X main.version=${RELEASE_TAG#v}"
+          [[ "$GOOS" == windows ]] && LDFLAGS="$LDFLAGS -H=windowsgui"
+          CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go${EXT}" .
           cp README.md LICENSE NOTICE.md dist/package/
           cp -r third_party dist/package/
           (cd dist/package && zip -q -r "../bilipdj-go-${GOOS}-${GOARCH}.zip" .)

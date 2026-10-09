@@ -2,6 +2,7 @@
 const { createApp, ref, computed, onMounted, onUnmounted, nextTick, watch } = Vue;
 createApp({setup(){
  const page=ref('logs'), status=ref({}), statuses=computed(()=>status.value.platforms||{});
+ const wizardOpen=ref(false),wizardStep=ref(0),wizardBusy=ref(false),wizardLoaded=ref(false),wizardError=ref('');
  const config=ref({bilibili:{room:'',cookie:'',enabled:false},douyin:{room:'',cookie:'',enabled:false},auto_queue:true,command:'排队',gift_queue:{enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false}});
  const obsStyle=ref({}), giftStatus=ref(null), giftNamesText=ref('');
  const qrImage=ref(''), qrState=ref(''), qrLink=ref('');let qrTimer=null, qrPolling=false;
@@ -22,9 +23,8 @@ createApp({setup(){
  const dateTime=t=>{try{return new Date(t).toLocaleTimeString('zh-CN',{hour12:false})}catch{return ''}};
  let eventStream=null, poller=null, clock=null;
  function message(t,level='info'){notice.value=t;noticeLevel.value=level}
- async function api(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};if(options.method&&options.method!=='GET'){
+ async function api(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};
  const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;
- }
  const resp=await fetch(path,{...options,headers});let data={};try{data=await resp.json()}catch{}
  if(!resp.ok){if(resp.status===403){const token=window.prompt('管理接口需要管理员 Token（本机直接运行通常无需输入）：');if(token){sessionStorage.setItem('pdj-token',token);return api(path,options)}}throw Error(data.error||`HTTP ${resp.status}`)}return data;
  }
@@ -38,7 +38,7 @@ createApp({setup(){
  async function refresh(){try{const [s,q,m,slots]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages'),api('/api/queue/slots')]);status.value=s;queue.value=q;messages.value=m;slotInfo.value=slots;selectedSlot.value=slots.active_slot}catch(e){message(e.message,'error')}}
  async function loadAppearance(){try{const appearance=await api('/api/appearance');const mode=appearance.mode==='light'?'light':'dark';const colors=appearance[mode]||{};const root=document.documentElement;const mapping={'--bg':'background','--panel':'surface','--panel2':'surface_alt','--line':'border','--text':'text','--dim':'muted','--accent':'accent'};for(const [css,k] of Object.entries(mapping)){const value=colors[k];if(typeof value==='string' && /^#[0-9a-fA-F]{3,8}$/.test(value))root.style.setProperty(css,value)}root.style.colorScheme=mode}catch{}}
  async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
- async function saveConfig(){busy.value=true;try{config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()])}catch(e){message(e.message,'error')}finally{busy.value=false}}
+ async function saveConfig(){busy.value=true;try{config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
  async function loadGiftStatus(){try{giftStatus.value=await api('/api/gifts/state')}catch(e){message(e.message,'error')}}
  async function loadObsStyle(){try{obsStyle.value=await api('/api/style')}catch(e){message(e.message,'error')}}
  async function saveObsStyle(){busy.value=true;try{await api('/api/style',{method:'POST',body:JSON.stringify(obsStyle.value)});message('OBS 样式已保存','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
@@ -79,6 +79,22 @@ createApp({setup(){
  async function logoutBili(){if(!window.confirm('确认清除 Go 版已保存的 B站登录 Cookie？'))return;
   stopQR();qrImage.value='';try{await api('/api/bili/logout',{method:'POST',body:'{}'});qrState.value='已清除登录会话';await loadConfig();message('已清除 B站登录 Cookie','success')}catch(e){message(e.message,'error')}
  }
+ async function checkOnboarding(){try{const response=await api('/api/onboarding');wizardLoaded.value=true;if(!response.completed){wizardStep.value=0;wizardError.value='';if(config.value.bilibili?.room==='3049445'&&!config.value.bilibili.enabled)config.value.bilibili.room='';wizardOpen.value=true}}catch(e){message('读取首次配置向导状态失败：'+e.message,'error')}}
+ function openWizard(){wizardStep.value=0;wizardOpen.value=true;wizardError.value='';wizardLoaded.value=true}
+ async function closeWizard(){if(wizardBusy.value)return;wizardBusy.value=true;try{
+   await api('/api/onboarding',{method:'POST',body:JSON.stringify({completed:true})});
+   wizardOpen.value=false;stopQR();qrImage.value='';
+   message('已跳过新手引导；可从左侧菜单随时重新打开','info');
+ }catch(e){wizardError.value='保存跳过状态失败：'+e.message;message(wizardError.value,'error')}finally{wizardBusy.value=false}}
+ async function finishWizard(){if(wizardBusy.value)return;
+   if(config.value.bilibili.enabled&&!String(config.value.bilibili.room||'').trim()){wizardError.value='请填写 B站直播间号，或暂时关闭 B站监听';wizardStep.value=1;return}
+   if(config.value.douyin.enabled&&!String(config.value.douyin.room||'').trim()){wizardError.value='请填写抖音直播间地址，或暂时关闭抖音监听';wizardStep.value=1;return}
+   wizardBusy.value=true;
+   try{const saved=await saveConfig();if(!saved){wizardError.value='保存失败，请检查页面顶部提示或配置内容';return;}
+      await api('/api/onboarding',{method:'POST',body:JSON.stringify({completed:true})});
+      wizardOpen.value=false;stopQR();qrImage.value='';message('初始设置完成，平台监听已更新','success');
+   }catch(e){wizardError.value='完成引导失败：'+e.message;message(wizardError.value,'error')}finally{wizardBusy.value=false}
+ }
  function selectLegacyFile(e){legacyFile.value=e.target.files?.[0]||null;legacyPreview.value=null;}
  async function legacyAction(action){if(!legacyFile.value){message('请先选择旧版配置文件或备份 ZIP','error');return}
   if(action==='import'&&!window.confirm('确认导入并覆盖新版对应配置？旧版原始文件和当前新版配置都会先备份。'))return;
@@ -88,7 +104,7 @@ createApp({setup(){
    legacyPreview.value=result.preview||result;message(action==='preview'?'预览完成，不会修改配置':'导入成功：已备份当前配置和旧版原始文件','success');if(action==='import'){await Promise.all([loadConfig(),refresh(),loadAppearance()])}
   }catch(e){message(e.message,'error')}finally{busy.value=false}}
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
- onMounted(()=>{refresh();refreshLogs();loadConfig();loadAppearance();loadObsStyle();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
+ onMounted(()=>{refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
  onUnmounted(()=>{if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
- return {page,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,giftStatus,giftNamesText,loadGiftStatus,obsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {page,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,giftStatus,giftNamesText,loadGiftStatus,obsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');

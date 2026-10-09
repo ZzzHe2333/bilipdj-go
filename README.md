@@ -1,6 +1,6 @@
 # BiliPDJ Go · 轻量直播排队工具
 
-全新独立实现（v0.7.0，技术预览）：**Go 标准库后端 + Vue 3 前端（随程序离线打包）**。参考旧版 BiliPDJ 协议规则但不直接引入 Python 运行时。
+全新独立实现（v0.8.0，技术预览）：**Go 标准库后端 + Vue 3 前端（随程序离线打包）**。参考旧版 BiliPDJ 协议规则但不直接引入 Python 运行时。
 
 ## 本版功能范围
 
@@ -34,7 +34,16 @@ go run .
 - OBS：`http://127.0.0.1:9816/overlay.html`
 - 服务：`GET /health`、`GET /api/status`、`GET /api/queue`、`GET /api/events`（SSE）
 
-选择平台、填写直播间号、开启监听并保存，双平台可同时启用。默认 `127.0.0.1:9816` 只允许本机访问；Cookie 将保存在本机 `data/state.json`，请妥善保护该目录（文件权限 0600）。
+Windows 发行版会自动打开网页；新安装可按首次使用向导配置或选择跳过。其他系统请手动访问 Web 地址。选择平台、填写直播间号、开启监听并保存，双平台可同时启用。默认 `127.0.0.1:9816` 只允许本机访问；Cookie 将保存在本机 `data/state.json`，请妥善保护该目录（文件权限 0600）。
+
+## Windows v0.8.0：无黑框托盘模式与新手配置向导
+
+- **Windows 发行包**使用 `-H=windowsgui` 构建，双击 EXE 不再弹出黑色终端窗口；服务后台运行，在任务栏右下角系统托盘（或折叠的隐藏图标区）显示 BiliPDJ Go 图标。
+- 程序监听端口成功后，自动在系统默认浏览器打开 Web 管理界面。**双击托盘图标**再次打开界面；**右键托盘图标**可打开界面或**退出程序**。仅关闭浏览器标签页不会终止后台服务。
+- **新安装首次打开网页**会出现可跳过的分步向导：B站、抖音启用和直播间地址、B站扫码登录、排队关键词、队列上限与每日次数限制。完成或跳过写入 `data/state.json`；以后不会自动打扰。升级已配置的旧版本默认跳过向导；需要时使用侧边栏底部的「新手配置引导」重新打开。
+- **数据存放**：Windows 新安装默认保存在 EXE 所在目录的 `data/`；如果启动工作目录已有旧版 `data/state.json`，继续使用旧数据。也支持 `-data` 或 `BILIPDJ_DATA_DIR` 自定义目录，迁移前请备份原始 `data/`。
+- 从源码手动编译 Windows 无黑框版本：`go build -ldflags="-H=windowsgui" -o bilipdj-go.exe .`。普通 `go run .` 不会自动启用 GUI 子系统。Linux/macOS/Docker 保持控制台运行，不主动打开浏览器。
+- 如果托盘图标没有直接显示，请点击任务栏右下角的「显示隐藏的图标」。目前使用 Windows 通用应用图标；将在后续版本添加独立品牌图标。此模式仍需在真实 Windows 桌面验收托盘菜单与浏览器打开行为。
 
 ## Docker
 
@@ -72,6 +81,7 @@ GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 
 - `GET /api/gifts/state`：管理员授权查看礼物资格计数和最后事件（不返回 UID 名单）。
 - `GET /ws`：旧版只读 WebSocket 推送桥接，不执行客户端发来的管理指令。
 - `POST /api/bili/qr/start` / `POST /api/bili/qr/poll`：管理员授权启动扫码及查询状态；扫码登录后验证账号再保存 Cookie。`POST /api/bili/logout` 清除 Cookie。
+- `GET /api/onboarding` / `POST /api/onboarding`：首次使用引导状态和完成/跳过持久化；只允许本机或管理员 Token，POST 仅接受 `{"completed":true}`。
 - `GET /api/events`：`text/event-stream`；事件类型 `danmu`、`queue`、`status`、`gift`。
 - `GET /api/update`：GitHub Release 与可更新状态。
 - `POST /api/update/download`：仅下载并 SHA-256 校验到更新暂存目录，不直接安装。
