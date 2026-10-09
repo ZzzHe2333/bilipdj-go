@@ -28,7 +28,9 @@ func RunStdio(in io.Reader, out io.Writer) error {
   ip:=net.ParseIP(h)
   if h!="localhost" && (ip==nil || !ip.IsLoopback()) {return errors.New("remote MCP servers require HTTPS")}
  }
- token:=os.Getenv("BILIPDJ_MCP_WRITE_TOKEN")
+ // Do not silently inherit the server's write credential. An AI client
+ // must explicitly opt in to privileged tools with its own client token.
+ token:=os.Getenv("BILIPDJ_MCP_CLIENT_TOKEN")
  if token=="" {token=os.Getenv("BILIPDJ_MCP_READ_TOKEN")}
  client:=&http.Client{Timeout:30*time.Second,CheckRedirect:func(_ *http.Request,_ []*http.Request)error{return http.ErrUseLastResponse}}
  scanner:=bufio.NewScanner(in)
