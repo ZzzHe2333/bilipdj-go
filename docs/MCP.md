@@ -40,7 +40,7 @@ export BILIPDJ_MCP_WRITE_TOKEN="替换为不同的强随机写入令牌"
 
 Windows 可通过启动脚本的进程环境变量设置这些值。Docker Compose 通过 `.env` 定义变量再传入容器（默认 compose 只发布宿主机回环接口）。**HTTP 远程接入请使用 HTTPS 反向代理/私网 VPN**，避免明文传输 Bearer token。若将第三方 AI 接入写权限，应在 AI 客户端侧限制授权范围并对删除/清空操作要求人工确认。
 
-stdio 桥接同样读取 `BILIPDJ_MCP_WRITE_TOKEN`（优先）或 `BILIPDJ_MCP_READ_TOKEN`，并在连接 HTTP 服务时使用 Bearer token。若使用非本机 URL，必须是 HTTPS。
+stdio 桥接**默认不继承服务端写令牌**：如果 AI 客户端进程设置了 `BILIPDJ_MCP_READ_TOKEN`，桥接默认只会使用该只读令牌（本地无令牌时也能读取）；需要允许 AI 执行管理操作时，**必须在 AI 客户端的 MCP 环境变量中单独指定 `BILIPDJ_MCP_CLIENT_TOKEN`，值为服务端配置的写令牌**。这避免因服务进程和 AI 客户端意外共享环境变量而将写权限默认交给模型。若使用非本机 URL，必须是 HTTPS。
 
 ## 可供 AI 使用的工具
 
