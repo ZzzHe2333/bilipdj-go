@@ -22,6 +22,7 @@ jobs:
           test "$(sed -n 's/^var version = \"\([^\"]*\)\"/\1/p' main.go)" = "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Reject publishing an existing version
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
@@ -69,6 +70,7 @@ jobs:
             dist/*.zip
             dist/*.sha256
   release:
+    if: github.event_name == 'workflow_dispatch'
     needs: [test, build]
     runs-on: ubuntu-latest
     steps:

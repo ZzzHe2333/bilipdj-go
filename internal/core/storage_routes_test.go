@@ -76,45 +76,57 @@ func TestPythonImportDoesNotMutateSource(t *testing.T) {
 		t.Fatal(state.Queue)
 	}
 }
-func TestStorageChoiceRequiresAdminAndRestart(t *testing.T) {
+func TestStorageChoiceRequiresAdminAndNeverUsesPythonRoot(t *testing.T) {
 	dir := t.TempDir()
 	appDir := filepath.Join(dir, "portable")
 	old := filepath.Join(appDir, "data")
-	newDir := filepath.Join(dir, "xdg", "bilipdj")
-	for _, target := range []string{filepath.Join(old, "state.json"), filepath.Join(newDir, "state.json")} {
-		if e := os.MkdirAll(filepath.Dir(target), 0700); e != nil {
+	env := map[string]string{"XDG_DATA_HOME": filepath.Join(dir, "xdg")}
+	newDir := filepath.Join(env["XDG_DATA_HOME"], "bilipdj-go")
+	oldShared := filepath.Join(env["XDG_DATA_HOME"], "bilipdj")
+	for path, content := range map[string]string{
+		filepath.Join(oldShared, "state.json"): `{"config":{"command":"legacy"}}`,
+		filepath.Join(newDir, "state.json"):    `{"config":{"command":"current"}}`,
+	} {
+		if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 			t.Fatal(e)
 		}
-		if e := os.WriteFile(target, []byte("{}"), 0600); e != nil {
+		if e := os.WriteFile(path, []byte(content), 0600); e != nil {
 			t.Fatal(e)
 		}
 	}
-	p, e := storage.PlanFor(appDir, old, "", "linux", dir, map[string]string{"XDG_DATA_HOME": filepath.Dir(newDir)})
-	if e != nil || !p.Conflict {
+	p, e := storage.PlanFor(appDir, old, "", "linux", dir, env)
+	if e != nil || !p.Conflict || p.Active != newDir {
 		t.Fatal(p, e)
 	}
-	a := New(old, "test", "repo")
-	a.SetStoragePlan(p)
+	a := New(newDir, "test", "repo")
+	if err := a.SetStoragePlan(p); err != nil {
+		t.Fatal(err)
+	}
 	h := a.Routes(http.NotFoundHandler())
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/api/storage/choice", strings.NewReader(`{"choice":"user"}`))
-	req.RemoteAddr = "10.1.2.3:1234"
-	req.Host = "localhost"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != 403 {
-		t.Fatalf("unauthorized HTTP %d", rr.Code)
+	sendChoice := func(choice, remote string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/api/storage/choice", strings.NewReader(`{"choice":"`+choice+`"}`))
+		req.RemoteAddr = remote
+		req.Host = "localhost"
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr
 	}
-	req = httptest.NewRequest(http.MethodPost, "http://localhost/api/storage/choice", strings.NewReader(`{"choice":"user"}`))
-	req.RemoteAddr = "127.0.0.1:4242"
-	req.Host = "localhost"
-	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "restart_required") {
-		t.Fatalf("choose HTTP %d %s", rr.Code, rr.Body.String())
+	if got := sendChoice("user", "10.1.2.3:1234"); got.Code != 403 {
+		t.Fatalf("remote: %d", got.Code)
 	}
-	after, e := storage.PlanFor(appDir, old, "", "linux", dir, map[string]string{"XDG_DATA_HOME": filepath.Dir(newDir)})
-	if e != nil || after.Active != newDir {
+	if got := sendChoice("legacy", "127.0.0.1:4242"); got.Code != 400 {
+		t.Fatalf("must reject legacy: %d %s", got.Code, got.Body)
+	}
+	if got := sendChoice("user", "127.0.0.1:4242"); got.Code != 200 {
+		t.Fatalf("user: %d %s", got.Code, got.Body)
+	}
+	after, e := storage.PlanFor(appDir, old, "", "linux", dir, env)
+	if e != nil || after.Conflict || after.Active != newDir {
 		t.Fatal(after, e)
+	}
+	before, _ := os.ReadFile(filepath.Join(oldShared, "state.json"))
+	if !strings.Contains(string(before), "legacy") {
+		t.Fatal("old Python directory changed")
 	}
 }
 func TestWebStylesSeparateFromTk(t *testing.T) {
@@ -139,7 +151,6 @@ func TestWebStylesSeparateFromTk(t *testing.T) {
 
 func TestPR314PythonCSVUsesLocalArchiveDirectory(t *testing.T) {
 	root := t.TempDir()
-	roaming := filepath.Join(root, "roaming", "bilipdj")
 	local := filepath.Join(root, "local", "bilipdj", "archives")
 	if err := os.MkdirAll(local, 0700); err != nil {
 		t.Fatal(err)
@@ -149,8 +160,10 @@ func TestPR314PythonCSVUsesLocalArchiveDirectory(t *testing.T) {
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
-	a := New(roaming, "0.10.1", "repo")
-	p := storage.Plan{Mode: "managed", Active: roaming, User: roaming, ArchiveDir: local, BackupDir: filepath.Join(root, "local", "bilipdj", "backups")}
+	goRoot := filepath.Join(root, "roaming", "bilipdj-go")
+	goLocal := filepath.Join(root, "local", "bilipdj-go", "archives")
+	a := New(goRoot, "0.10.1", "repo")
+	p := storage.Plan{Mode: "managed", Active: goRoot, User: goRoot, ArchiveDir: goLocal, PythonArchiveDir: local, BackupDir: filepath.Join(root, "local", "bilipdj-go", "backups")}
 	if err := a.SetStoragePlan(p); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +191,7 @@ func TestPR314PythonCSVUsesLocalArchiveDirectory(t *testing.T) {
 	if err != nil || string(next) != string(original) {
 		t.Fatal("Python archive mutated")
 	}
-	if _, err = os.Stat(filepath.Join(local, "go-queue-state.json")); err != nil {
+	if _, err = os.Stat(filepath.Join(goLocal, "go-queue-state.json")); err != nil {
 		t.Fatal("Go queue did not persist in Local", err)
 	}
 }

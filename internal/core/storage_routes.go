@@ -42,7 +42,7 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
-		send(w, 200, map[string]any{"status": "ok", "choice": payload.Choice, "restart_required": true})
+		send(w, 200, map[string]any{"status": "ok", "choice": payload.Choice, "restart_required": false})
 	})
 	// Python archives stay read-only. A deliberate import writes Go's state.json
 	// and takes a separate snapshot before modifying any queue slots.
@@ -150,8 +150,9 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 // Modern PR #314 archives/ are authoritative. The legacy portable mode is
 // deliberately unchanged; a standalone test App defaults to core/cd.
 func (a *App) pythonCSVDirectory() string {
-	if a.storagePlan.Mode == "managed" && a.storagePlan.Active == a.storagePlan.User {
-		return a.storagePlan.ArchiveDir
+	if a.storagePlan.Mode == "managed" && a.storagePlan.PythonArchiveDir != "" {
+		// Read-only interoperability: Python owns its separate bilipdj directory.
+		return a.storagePlan.PythonArchiveDir
 	}
 	return filepath.Join(filepath.Dir(a.dataPath), "core", "cd")
 }

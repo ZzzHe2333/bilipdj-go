@@ -1,8 +1,9 @@
-// Package storage implements PR #312-compatible user data selection for Go.
-// It intentionally never changes or removes Python's core/* records.
+// Package storage keeps BiliPDJ Go user data physically separate from Python.
+// Only recognizable Go-owned state is copied from older shared installations.
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,104 +15,127 @@ import (
 )
 
 const choiceFile = ".storage-choice.json"
+const goFolder = "bilipdj-go"
+const pythonFolder = "bilipdj"
 
 type Plan struct {
-	Mode       string   `json:"mode"`
-	Legacy     string   `json:"legacy"`
-	User       string   `json:"user"`
-	Active     string   `json:"active"`
-	Choice     string   `json:"choice"`
-	Conflict   bool     `json:"conflict"`
-	Migrate    bool     `json:"migrate"`
-	OldHasData bool     `json:"old_has_data"`
-	NewHasData bool     `json:"new_has_data"`
-	ArchiveDir string   `json:"archive_dir"`
-	BackupDir  string   `json:"backup_dir"`
-	CacheDir   string   `json:"cache_dir"`
-	LogDir     string   `json:"log_dir"`
-	Conflicts  []string `json:"local_conflicts,omitempty"`
+	Mode               string   `json:"mode"`
+	Legacy             string   `json:"legacy"`
+	User               string   `json:"user"`
+	Active             string   `json:"active"`
+	Choice             string   `json:"choice"`
+	Conflict           bool     `json:"conflict"`
+	Migrate            bool     `json:"migrate"`
+	OldHasData         bool     `json:"old_has_data"`
+	NewHasData         bool     `json:"new_has_data"`
+	ArchiveDir         string   `json:"archive_dir"`
+	BackupDir          string   `json:"backup_dir"`
+	CacheDir           string   `json:"cache_dir"`
+	LogDir             string   `json:"log_dir"`
+	PythonArchiveDir   string   `json:"python_archive_dir,omitempty"`
+	PreviousGoRoot     string   `json:"previous_go_root,omitempty"`
+	PreviousGoArchives string   `json:"previous_go_archives,omitempty"`
+	Conflicts          []string `json:"local_conflicts,omitempty"`
 }
 
-// Roots optionally carry a synthetic OS, home and environment to exercise the
-// same policy on all 6 cross-compilation targets in CI.
-func UserRoot(goos, home string, env map[string]string) string {
-	if goos == "windows" {
-		if env["APPDATA"] != "" {
-			return filepath.Join(env["APPDATA"], "bilipdj")
+func userRootNamed(goos, home string, env map[string]string, folder string) string {
+	switch goos {
+	case "windows":
+		root := env["APPDATA"]
+		if root == "" {
+			root = filepath.Join(home, "AppData", "Roaming")
 		}
-		return filepath.Join(home, "AppData", "Roaming", "bilipdj")
+		return filepath.Join(root, folder)
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", folder)
+	default:
+		root := env["XDG_DATA_HOME"]
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(home, ".local", "share")
+		}
+		return filepath.Join(root, folder)
 	}
-	if goos == "darwin" {
-		return filepath.Join(home, "Library", "Application Support", "bilipdj")
+}
+func stateRootNamed(goos, home string, env map[string]string, folder string) string {
+	if goos == "windows" {
+		base := env["LOCALAPPDATA"]
+		if base == "" {
+			base = filepath.Join(home, "AppData", "Local")
+		}
+		return filepath.Join(base, folder)
 	}
-	base := env["XDG_DATA_HOME"]
-	if !filepath.IsAbs(base) {
-		base = filepath.Join(home, ".local", "share")
+	return userRootNamed(goos, home, env, folder)
+}
+func logRootNamed(goos, home string, env map[string]string, folder string) string {
+	switch goos {
+	case "windows":
+		return filepath.Join(stateRootNamed(goos, home, env, folder), "log")
+	case "darwin":
+		return filepath.Join(home, "Library", "Logs", folder)
+	default:
+		root := env["XDG_STATE_HOME"]
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(home, ".local", "state")
+		}
+		return filepath.Join(root, folder, "log")
 	}
-	return filepath.Join(base, "bilipdj")
+}
+func UserRoot(goos, home string, env map[string]string) string {
+	return userRootNamed(goos, home, env, goFolder)
+}
+func StateRoot(goos, home string, env map[string]string) string {
+	return stateRootNamed(goos, home, env, goFolder)
 }
 func LogRoot(goos, home string, env map[string]string) string {
-	if goos == "windows" {
-		if env["LOCALAPPDATA"] != "" {
-			return filepath.Join(env["LOCALAPPDATA"], "bilipdj", "log")
-		}
-		return filepath.Join(home, "AppData", "Local", "bilipdj", "log")
-	}
-	if goos == "darwin" {
-		return filepath.Join(home, "Library", "Logs", "bilipdj")
-	}
-	base := env["XDG_STATE_HOME"]
-	if !filepath.IsAbs(base) {
-		base = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(base, "bilipdj", "log")
-}
-
-// StateRoot holds high-frequency files. Windows keeps them out of Roaming.
-// macOS/Linux place archives/backups under the existing per-user data root.
-func StateRoot(goos, home string, env map[string]string) string {
-	if goos == "windows" {
-		if env["LOCALAPPDATA"] != "" {
-			return filepath.Join(env["LOCALAPPDATA"], "bilipdj")
-		}
-		return filepath.Join(home, "AppData", "Local", "bilipdj")
-	}
-	return UserRoot(goos, home, env)
+	return logRootNamed(goos, home, env, goFolder)
 }
 func setPaths(p *Plan, goos, home string, env map[string]string) {
-	if p.Mode == "explicit" || p.Active != p.User {
+	if p.Mode == "explicit" {
 		p.ArchiveDir = filepath.Join(p.Active, "core", "cd")
 		p.BackupDir = filepath.Join(p.Active, "backup")
 		p.CacheDir = filepath.Join(p.Active, "cache")
 		p.LogDir = filepath.Join(p.Active, "log")
 		return
 	}
-	state := StateRoot(goos, home, env)
-	p.ArchiveDir = filepath.Join(state, "archives")
-	p.BackupDir = filepath.Join(state, "backups")
-	p.CacheDir = filepath.Join(state, "cache")
+	p.ArchiveDir = filepath.Join(StateRoot(goos, home, env), "archives")
+	p.BackupDir = filepath.Join(StateRoot(goos, home, env), "backups")
+	p.CacheDir = filepath.Join(StateRoot(goos, home, env), "cache")
 	p.LogDir = LogRoot(goos, home, env)
+	p.PythonArchiveDir = filepath.Join(stateRootNamed(goos, home, env, pythonFolder), "archives")
+	p.PreviousGoArchives = "" // Set only for a verified Go state in the old shared user directory.
+}
+
+// A Go state must have its config object. Python-owned files and empty folders
+// never trigger migration into the new Go directory.
+func goState(path string) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 64<<20 {
+		return nil, false, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return nil, false, nil
+	}
+	var config map[string]json.RawMessage
+	if c, ok := fields["config"]; ok && json.Unmarshal(c, &config) == nil && config != nil {
+		return raw, true, nil
+	}
+	return nil, false, nil
 }
 
 func ExistingUserData(root string) bool {
-	files := []string{"state.json", "core/config.yaml", "core/quanxian.yaml", "core/kaiguan.yaml", "core/blacklist.csv", "core/style-web.json", "style-web.json", "appearance-web.json", "style-win.json", "appearance-win.json", "config.yaml", "style.json", "appearance.json"}
-	for _, p := range files {
-		if f, e := os.Lstat(filepath.Join(root, p)); e == nil && f.Mode().IsRegular() {
-			return true
-		}
-	}
-	for _, rel := range []string{"core/cd", "plugins", "key", "backup"} {
-		folder := filepath.Join(root, rel)
-		if f, e := os.Lstat(folder); e == nil && f.IsDir() {
-			entries, _ := os.ReadDir(folder)
-			for _, entry := range entries {
-				if entry.Name() != ".gitkeep" && !strings.HasPrefix(entry.Name(), ".bilipdj-appdata-sync") {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	_, ok, _ := goState(filepath.Join(root, "state.json"))
+	return ok
 }
 func envNow() map[string]string {
 	e := map[string]string{}
@@ -121,16 +145,23 @@ func envNow() map[string]string {
 	return e
 }
 func Resolve(appDir, legacyData, explicit string) (Plan, error) {
-	home, e := os.UserHomeDir()
-	if e != nil {
-		return Plan{}, e
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Plan{}, err
 	}
 	return PlanFor(appDir, legacyData, explicit, runtime.GOOS, home, envNow())
 }
 func PlanFor(appDir, legacyData, explicit, goos, home string, env map[string]string) (Plan, error) {
 	var p Plan
-	appDir, _ = filepath.Abs(appDir)
-	legacyData, _ = filepath.Abs(legacyData)
+	var err error
+	appDir, err = filepath.Abs(appDir)
+	if err != nil {
+		return p, err
+	}
+	legacyData, err = filepath.Abs(legacyData)
+	if err != nil {
+		return p, err
+	}
 	p.Legacy = legacyData
 	p.User = UserRoot(goos, home, env)
 	if explicit != "" {
@@ -138,36 +169,79 @@ func PlanFor(appDir, legacyData, explicit, goos, home string, env map[string]str
 			explicit = filepath.Join(appDir, explicit)
 		}
 		p.Active = filepath.Clean(explicit)
-		p.Mode = "explicit"
-		p.Choice = "explicit"
+		p.Mode, p.Choice = "explicit", "explicit"
 		setPaths(&p, goos, home, env)
 		return p, nil
 	}
-	p.Mode = "managed"
-	p.User, _ = filepath.Abs(p.User)
+	p.Mode, p.Choice = "managed", "user"
+	p.User, err = filepath.Abs(p.User)
+	if err != nil {
+		return p, err
+	}
 	if p.User == appDir || p.User == legacyData || strings.HasPrefix(p.User, appDir+string(os.PathSeparator)) || strings.HasPrefix(appDir, p.User+string(os.PathSeparator)) {
-		return p, errors.New("system user directory must not overlap application directory")
+		return p, errors.New("Go user directory must be separate from application directory")
 	}
-	// Legacy Python's project root, and the former Go ./data directory.
-	p.OldHasData = ExistingUserData(legacyData) || ExistingUserData(appDir)
-	p.NewHasData = ExistingUserData(p.User)
-	choice := strings.ToLower(strings.TrimSpace(env["BILIPDJ_DATA_CHOICE"]))
-	if choice != "legacy" && choice != "user" {
-		choice = readChoice(p.User)
-	}
-	p.Choice = choice
-	p.Conflict = p.OldHasData && p.NewHasData && choice == ""
-	p.Active = p.User
-	if p.Conflict || choice == "legacy" {
-		p.Active = p.Legacy
-	}
-	p.Migrate = p.OldHasData && !p.NewHasData && p.Active == p.User
+	p.Active = p.User // Never write to Python's bilipdj root, even on conflict.
 	setPaths(&p, goos, home, env)
+	previous := userRootNamed(goos, home, env, pythonFolder)
+	candidates := []string{previous, legacyData}
+	var selected []byte
+	for _, path := range candidates {
+		raw, ok, err := goState(filepath.Join(path, "state.json"))
+		if err != nil {
+			return p, err
+		}
+		if !ok {
+			// Both candidate paths are historically reserved for Go's
+			// state.json; a malformed copy must not silently produce an empty
+			// installation or discard the user's login and queue.
+			if _, statErr := os.Lstat(filepath.Join(path, "state.json")); statErr == nil {
+				return p, fmt.Errorf("old Go state.json at %s is invalid or unsafe; back it up before migration", path)
+			}
+			continue
+		}
+		if selected != nil && !bytes.Equal(selected, raw) {
+			return p, fmt.Errorf("multiple different old Go state.json files (%s, %s); back up and select one manually", p.PreviousGoRoot, path)
+		}
+		if selected == nil {
+			p.PreviousGoRoot, selected = path, raw
+		}
+	}
+	p.OldHasData = selected != nil
+	if p.PreviousGoRoot == previous {
+		p.PreviousGoArchives = p.PythonArchiveDir
+	}
+	existing, valid, err := goState(filepath.Join(p.User, "state.json"))
+	if err != nil {
+		return p, err
+	}
+	if !valid {
+		if info, err := os.Lstat(filepath.Join(p.User, "state.json")); err == nil && info != nil {
+			return p, fmt.Errorf("existing Go state.json is invalid; refusing to overwrite: %s", filepath.Join(p.User, "state.json"))
+		}
+	}
+	p.NewHasData = valid
+	if p.OldHasData && p.NewHasData && !bytes.Equal(existing, selected) {
+		p.Conflict = readChoice(p.User) != "user"
+		p.Conflicts = append(p.Conflicts, filepath.Join(p.User, "state.json"))
+	}
+	p.Migrate = p.OldHasData && !p.NewHasData
 	return p, nil
 }
-func readChoice(user string) string {
-	data, e := os.ReadFile(filepath.Join(user, choiceFile))
-	if e != nil {
+
+// New installations never switch to the shared old Python directory.
+func Choose(p Plan, choice string) error {
+	if p.Mode != "managed" {
+		return errors.New("explicit storage cannot be changed")
+	}
+	if choice != "user" {
+		return errors.New("legacy bilipdj directory is reserved for Python; Go only uses bilipdj-go")
+	}
+	return saveChoice(p.User, choice)
+}
+func readChoice(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, choiceFile))
+	if err != nil {
 		return ""
 	}
 	var v struct {
@@ -176,184 +250,143 @@ func readChoice(user string) string {
 	if json.Unmarshal(data, &v) != nil {
 		return ""
 	}
-	if v.Choice == "legacy" || v.Choice == "user" {
-		return v.Choice
-	}
-	return ""
+	return v.Choice
 }
-func Choose(p Plan, choice string) error {
-	if p.Mode != "managed" {
-		return errors.New("explicit data directory cannot be changed via UI")
+func saveChoice(root, choice string) error {
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return err
 	}
-	if choice != "legacy" && choice != "user" {
-		return errors.New("choice must be legacy or user")
+	f, err := os.CreateTemp(root, ".storage-choice-*")
+	if err != nil {
+		return err
 	}
-	return saveChoice(p.User, choice)
-}
-func saveChoice(user, choice string) error {
-	if e := os.MkdirAll(user, 0700); e != nil {
-		return e
+	defer os.Remove(f.Name())
+	_ = f.Chmod(0600)
+	data, _ := json.Marshal(map[string]any{"schema": 1, "choice": choice})
+	if _, err = f.Write(append(data, '\n')); err != nil {
+		f.Close()
+		return err
 	}
-	tmp, e := os.CreateTemp(user, ".storage-choice-*")
-	if e != nil {
-		return e
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
 	}
-	defer os.Remove(tmp.Name())
-	_ = tmp.Chmod(0600)
-	raw, _ := json.Marshal(map[string]any{"schema": 1, "choice": choice})
-	raw = append(raw, '\n')
-	if _, e = tmp.Write(raw); e != nil {
-		tmp.Close()
-		return e
+	if err = f.Close(); err != nil {
+		return err
 	}
-	if e = tmp.Sync(); e != nil {
-		tmp.Close()
-		return e
-	}
-	if e = tmp.Close(); e != nil {
-		return e
-	}
-	return os.Rename(tmp.Name(), filepath.Join(user, choiceFile))
+	return os.Rename(f.Name(), filepath.Join(root, choiceFile))
 }
 
-// CopyOnly migrates a fixed allowlist; it cannot follow symlinked paths or
-// overwrite targets. It pins the new directory only after successful copies.
+// CopyOnly copies only proven Go-owned files. Python config, CSV, plugins,
+// snapshots and shared storage-choice decisions are never imported implicitly.
 func CopyOnly(p Plan, appDir string) (int, error) {
 	if !p.Migrate || p.Mode != "managed" {
 		return 0, nil
 	}
+	if p.PreviousGoRoot == "" {
+		return 0, errors.New("old Go state source not resolved")
+	}
+	if _, ok, err := goState(filepath.Join(p.PreviousGoRoot, "state.json")); err != nil || !ok {
+		return 0, errors.New("old Go state is no longer valid; stop migration")
+	}
 	count := 0
-	copyOne := func(src, dst string) error {
-		info, e := os.Lstat(src)
-		if os.IsNotExist(e) {
-			return nil
+	for _, name := range []string{"style-web.json", "appearance-web.json", "state.json"} {
+		src := filepath.Join(p.PreviousGoRoot, name)
+		target := filepath.Join(p.User, name)
+		copied, err := copyMissing(src, target)
+		if err != nil {
+			return count, err
 		}
-		if e != nil {
-			return e
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		// Never follow a symlink in any component below one of the trusted roots.
-		if !safeComponents(src, appDir, p.Legacy) {
-			return nil
-		}
-		if !safeComponents(dst, p.User, p.ArchiveDir, p.BackupDir) {
-			return fmt.Errorf("unsafe destination parent for %s", dst)
-		}
-		if info.Size() > 64<<20 {
-			return fmt.Errorf("migration file too large: %s", src)
-		}
-		if e = os.MkdirAll(filepath.Dir(dst), 0700); e != nil {
-			return e
-		}
-		to, e := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if os.IsExist(e) {
-			return nil
-		}
-		if e != nil {
-			return e
-		}
-		from, e := os.Open(src)
-		if e != nil {
-			to.Close()
-			os.Remove(dst)
-			return e
-		}
-		_, e = io.Copy(to, from)
-		from.Close()
-		closeErr := to.Close()
-		if e != nil || closeErr != nil {
-			os.Remove(dst)
-			if e != nil {
-				return e
-			}
-			return closeErr
-		}
-		count++
-		return nil
-	}
-	// Old Go root: only Go-owned files are transferred, not executable assets.
-	for _, name := range []string{"state.json"} {
-		if e := copyOne(filepath.Join(p.Legacy, name), filepath.Join(p.User, name)); e != nil {
-			return count, e
+		if copied {
+			count++
 		}
 	}
-	// Python's original project layout, preserved exactly under the common root.
-	files := []string{"core/config.yaml", "core/quanxian.yaml", "core/kaiguan.yaml", "core/blacklist.csv", "core/webdav_backup.json", "core/gift_compatibility.json", "core/language.json", "core/style.json", "core/appearance.json", "core/style-web.json", "core/style-win.json", "core/appearance-web.json", "core/appearance-win.json", "config.yaml", "quanxian.yaml", "kaiguan.yaml", "blacklist.csv", "style.json", "appearance.json", "style-web.json", "style-win.json", "appearance-web.json", "appearance-win.json"}
-	for _, rel := range files {
-		if e := copyOne(filepath.Join(appDir, rel), filepath.Join(p.User, rel)); e != nil {
-			return count, e
-		}
-	}
-	for _, dir := range []string{"core/cd", "plugins", "key", "backup"} {
-		root := filepath.Join(appDir, dir)
-		if info, e := os.Lstat(root); e != nil || !info.IsDir() {
-			continue
-		}
-		e := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.Type()&os.ModeSymlink != 0 {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if !d.Type().IsRegular() {
-				return nil
-			}
-			rel, err := filepath.Rel(appDir, path)
-			if err != nil {
-				return err
-			}
-			dst := filepath.Join(p.User, rel)
-			if dir == "core/cd" {
-				dst = filepath.Join(p.ArchiveDir, strings.TrimPrefix(rel, "core"+string(os.PathSeparator)+"cd"+string(os.PathSeparator)))
-			}
-			if dir == "backup" {
-				dst = filepath.Join(p.BackupDir, strings.TrimPrefix(rel, "backup"+string(os.PathSeparator)))
-			}
-			return copyOne(path, dst)
-		})
-		if e != nil {
-			return count, e
-		}
-	}
-	if e := saveChoice(p.User, "user"); e != nil {
-		return count, fmt.Errorf("migrated data but failed to record choice: %w", e)
+	// New Go storage is permanently authoritative; the old Python/shared
+	// directory must never be selected by a leftover storage-choice file.
+	if err := saveChoice(p.User, "user"); err != nil {
+		return count, err
 	}
 	return count, nil
 }
 
-// safeComponents checks existing path elements for symlinks. A destination
-// component that does not exist is safe to create; existing junctions are not.
+// Copy via O_EXCL, leaving both source and any previously-existing target intact.
+func copyMissing(src, dst string) (bool, error) {
+	info, err := os.Lstat(src)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 64<<20 {
+		return false, fmt.Errorf("unsafe Go migration source: %s", src)
+	}
+	if !safeComponents(src, filepath.Dir(src)) || !safeComponents(dst, filepath.Dir(dst)) {
+		return false, fmt.Errorf("unsafe Go migration path: %s", src)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return false, err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if os.IsExist(err) {
+		old, e := os.ReadFile(dst)
+		if e != nil {
+			return false, e
+		}
+		newer, e := os.ReadFile(src)
+		if e != nil {
+			return false, e
+		}
+		if !bytes.Equal(old, newer) {
+			return false, fmt.Errorf("Go migration conflict: %s differs from %s (neither was overwritten)", src, dst)
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		out.Close()
+		os.Remove(dst)
+		return false, err
+	}
+	_, err = io.Copy(out, in)
+	in.Close()
+	if e := out.Sync(); err == nil {
+		err = e
+	}
+	if e := out.Close(); err == nil {
+		err = e
+	}
+	if err != nil {
+		os.Remove(dst)
+		return false, err
+	}
+	return true, nil
+}
 func safeComponents(candidate string, roots ...string) bool {
 	for _, root := range roots {
 		root, _ = filepath.Abs(root)
 		candidate, _ = filepath.Abs(candidate)
-		rel, e := filepath.Rel(root, candidate)
-		if e != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		rel, err := filepath.Rel(root, candidate)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			continue
 		}
-		current := root
-		if info, e := os.Lstat(root); e == nil && info.Mode()&os.ModeSymlink != 0 {
+		walk := root
+		if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			return false
 		}
-		for _, segment := range strings.Split(rel, string(os.PathSeparator)) {
-			if segment == "." {
+		for _, seg := range strings.Split(rel, string(os.PathSeparator)) {
+			if seg == "." {
 				continue
 			}
-			current = filepath.Join(current, segment)
-			info, e := os.Lstat(current)
-			if os.IsNotExist(e) {
+			walk = filepath.Join(walk, seg)
+			info, err := os.Lstat(walk)
+			if os.IsNotExist(err) {
 				continue
 			}
-			if e != nil || info.Mode()&os.ModeSymlink != 0 {
+			if err != nil || info.Mode()&os.ModeSymlink != 0 {
 				return false
 			}
 		}
@@ -362,112 +395,92 @@ func safeComponents(candidate string, roots ...string) bool {
 	return false
 }
 
-// MigrateLocalState copies Python's legacy queue CSV and backups from Roaming or
-// portable roots to PR #314's local archive directories. It never removes or
-// replaces a source or an existing destination. Divergent files are reported.
-func MigrateLocalState(p *Plan, appDir string) (int, error) {
+// Copy older Go-specific queue and rolling backups, but not a single Python CSV.
+// Call only before the new destination has been used or if files are missing.
+func MigrateLocalState(p *Plan, _ string) (int, error) {
 	if p.Mode != "managed" || p.Active != p.User {
 		return 0, nil
 	}
-	count := 0
-	seen := map[string]bool{}
-	for _, dir := range []string{p.User, appDir} {
-		for _, spec := range []struct{ src, dst string }{
-			{"core/cd", p.ArchiveDir},
-			{"backup", p.BackupDir},
-			{"backups", p.BackupDir},
-			{"archives", p.ArchiveDir},
-		} {
-			source := filepath.Join(dir, filepath.FromSlash(spec.src))
-			// On macOS/Linux these directories can be identical.
-			if filepath.Clean(source) == filepath.Clean(spec.dst) {
-				continue
-			}
-			info, err := os.Lstat(source)
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err != nil {
-				return count, err
-			}
-			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			err = filepath.WalkDir(source, func(path string, d os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
-				}
-				if d.Type()&os.ModeSymlink != 0 {
-					return nil
-				}
-				if d.IsDir() {
-					return nil
-				}
-				if !d.Type().IsRegular() || !safeComponents(path, source) {
-					return nil
-				}
-				rel, err := filepath.Rel(source, path)
-				if err != nil {
-					return err
-				}
-				target := filepath.Join(spec.dst, rel)
-				if !safeComponents(target, spec.dst) {
-					return fmt.Errorf("unsafe local migration target: %s", target)
-				}
-				old, e := os.ReadFile(path)
-				if e != nil {
-					return e
-				}
-				if len(old) > 64<<20 {
-					return fmt.Errorf("local archive exceeds limit: %s", path)
-				}
-				if dstInfo, e := os.Lstat(target); e == nil {
-					if !dstInfo.Mode().IsRegular() {
-						return fmt.Errorf("unsafe existing local archive: %s", target)
-					}
-					newer, e := os.ReadFile(target)
-					if e != nil {
-						return e
-					}
-					if string(old) != string(newer) && !seen[target] {
-						p.Conflicts = append(p.Conflicts, target)
-						seen[target] = true
-					}
-					return nil
-				} else if !os.IsNotExist(e) {
-					return e
-				}
-				if e := os.MkdirAll(filepath.Dir(target), 0700); e != nil {
-					return e
-				}
-				dest, e := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
-				if os.IsExist(e) {
-					return nil
-				}
-				if e != nil {
-					return e
-				}
-				_, e = dest.Write(old)
-				ce := dest.Close()
-				if e != nil || ce != nil {
-					os.Remove(target)
-					if e != nil {
-						return e
-					}
-					return ce
-				}
-				count++
-				return nil
-			})
-			if err != nil {
-				return count, err
-			}
-		}
-	}
 	for _, dir := range []string{p.ArchiveDir, p.BackupDir, p.CacheDir, p.LogDir} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
+			return 0, err
+		}
+	}
+	if !p.OldHasData || p.PreviousGoArchives == "" {
+		return 0, nil
+	}
+	// If Go is already operating from the new directory, stale legacy copies
+	// must never replace (or make startup fail over) a newer current queue.
+	if !p.Migrate && (p.Conflict || !p.NewHasData) {
+		return 0, nil
+	}
+	// A partial migration is resumable only while the new state is byte-for-byte
+	// identical to the old state (no newer Go writes have occurred).
+	if !p.Migrate {
+		old, oldErr := os.ReadFile(filepath.Join(p.PreviousGoRoot, "state.json"))
+		current, currentErr := os.ReadFile(filepath.Join(p.User, "state.json"))
+		if oldErr != nil || currentErr != nil || !bytes.Equal(old, current) {
+			return 0, nil
+		}
+	}
+	oldState, err := os.ReadFile(filepath.Join(p.PreviousGoRoot, "state.json"))
+	if err != nil {
+		return 0, err
+	}
+	var oldMarker struct {
+		QueueExternal bool `json:"queue_external"`
+	}
+	if err := json.Unmarshal(oldState, &oldMarker); err != nil {
+		return 0, err
+	}
+	if !oldMarker.QueueExternal {
+		return 0, nil
+	}
+	source := filepath.Join(p.PreviousGoArchives, "go-queue-state.json")
+	target := filepath.Join(p.ArchiveDir, "go-queue-state.json")
+	count := 0
+	n, err := copyMissingIfPresent(source, target)
+	if err != nil {
+		return count, err
+	}
+	if n {
+		count++
+	}
+	// Only Go-prefixed rolling CSVs are migrated. All Python archives and
+	// Python backups stay under bilipdj.
+	backupRoot := filepath.Join(filepath.Dir(p.PreviousGoArchives), "backups")
+	for i := 1; i <= 10; i++ {
+		sub := fmt.Sprintf("queue/queue_archive_slot_%d", i)
+		dir := filepath.Join(backupRoot, filepath.FromSlash(sub))
+		entries, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
 			return count, err
+		}
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), "go-") || !strings.HasSuffix(entry.Name(), ".csv") {
+				continue
+			}
+			src := filepath.Join(dir, entry.Name())
+			dst := filepath.Join(p.BackupDir, filepath.FromSlash(sub), entry.Name())
+			copied, err := copyMissingIfPresent(src, dst)
+			if err != nil {
+				return count, err
+			}
+			if copied {
+				count++
+			}
 		}
 	}
 	return count, nil
+}
+func copyMissingIfPresent(src, dst string) (bool, error) {
+	if _, err := os.Lstat(src); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return copyMissing(src, dst)
 }

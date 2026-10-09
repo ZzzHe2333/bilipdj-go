@@ -37,23 +37,24 @@ go run .
 Windows 发行版会自动打开网页；新安装可按首次使用向导配置或选择跳过。其他系统请手动访问 Web 地址。选择平台、填写直播间号、开启监听并保存，双平台可同时启用。默认 `127.0.0.1:9816` 只允许本机访问；Cookie 将保存在当前生效的数据目录 `state.json`，请妥善保护该目录（文件权限 0600）。
 
 
-## v0.9.0：兼容 Python PR #312 的目录与存档
+## Go 独立数据目录（不改 Python 项目）
 
-与 [Python PR #312](https://github.com/ZzzHe2333/bilipdj/pull/312) 对齐的默认用户目录、COPY-only 迁移和双目录冲突提示见 [数据兼容说明](docs/USER_DATA_COMPAT.md)。只更新 `bilipdj-go`，**没有修改 Python 仓库**。
+Python `bilipdj` 保持 [PR #314](https://github.com/ZzzHe2333/bilipdj/pull/314) 的目录约定；本项目的 Go 默认数据全部迁入独立的 **`bilipdj-go`** 用户目录，两个程序不再共用持久化写入位置。详情见 [独立存档迁移说明](docs/USER_DATA_COMPAT.md)。
 
-- Windows：`%APPDATA%\bilipdj`；macOS：`~/Library/Application Support/bilipdj`；Linux：`$XDG_DATA_HOME/bilipdj`（回退 `~/.local/share/bilipdj`）。Go 自有状态为 `<用户目录>/state.json`，Python 的 `core/config.yaml` 和 `core/cd/` 原样保留；它们不会相互后台同步覆盖。
-- 如果新目录尚未有数据，仅从 Go 项目旧 `data/state.json` 和 Python 旧项目允许的配置/存档复制到新目录，不删除旧数据。已有两份数据时**不以时间戳覆盖**，默认先沿用旧 Go 数据位置；在 Web「数据与存档」选择来源后**重启生效**。显式 `-data` / `BILIPDJ_DATA_DIR` 不受自动迁移影响。
-- PR #314 的存档目录微调：Windows Roaming 保留配置 `state.json`，Local `archives/go-queue-state.json` 保存 Go 队列和十槽位；Python `archives/queue_archive_slot_N.csv` 继续独立。Local `backups/` 保存旧状态安全备份和每槽半小时最多一份的队列快照，`cache/` 存更新下载；Docker `/data` 布局不变。见 [数据目录兼容说明](docs/USER_DATA_COMPAT.md)。
-- 可在「数据与存档」页面直接查看用户目录中的 Python `core/cd/queue_archive_slot_N.csv` 并**手动导入**到 Go 队列（先备份已有 Go state.json）。也支持把当前 Go 槽位导出为 Python 可识别的带 BOM 五列 CSV；Python 原始 CSV 在导入/导出时均不被修改。
-- Web/OBS 样式存入 `style-web.json`、`appearance-web.json`；**绝不由 Go 自动读写 `style-win.json`、`appearance-win.json`**。Go 后端保留自己的 state.json，不实现 Python/Tk 数据库/配置文件直接联机共写。
-- Python PR 仍在开发时，以上是已读取的 PR head 的兼容实现。**同机运行两个后端应使用不同的监听端口，并在修改共享 Web 样式文件时避免同时保存。**
+- **Windows**：Go 配置、Cookie 和 Web 主题位于 `%APPDATA%\bilipdj-go/`，Go 队列与更新缓存分别位于 `%LOCALAPPDATA%\bilipdj-go/archives/`、`cache/`；备份在 `backups/`。
+- **macOS**：`~/Library/Application Support/bilipdj-go/`，队列与备份在其 `archives/`、`backups/` 子目录。
+- **Linux**：`$XDG_DATA_HOME/bilipdj-go/`（默认 `~/.local/share/bilipdj-go/`）；队列、备份同样在 `archives/`、`backups/`。
+- **升级迁移**：仅识别旧 Go `state.json`（包含 Go 专属 `config` 对象）并 COPY-only 到新目录；旧的 `archives/go-queue-state.json` 与 `go-*.csv` 历史备份在需要时一并复制。原来的 `bilipdj` 文件一律保留，**不复制 Python 配置、CSV、插件或备份**。发现两份不同 Go 状态时不自动覆盖，默认使用新的 Go 目录。
+- **跨项目导入**：「数据与存档」可以只读扫描 Python 的 `bilipdj/archives/queue_archive_slot_N.csv`，需要用户确认后才会**复制数据到 Go**；默认不存在自动双向同步。
+- **便携/Docker**：已明确设置的 `-data` 或 `BILIPDJ_DATA_DIR` 仍按原指定位置工作，例如容器 `/data`。两套程序要完全隔离时，请确保没有人为把这两个显式参数指向同一个目录。
+- Windows Tk 使用的 `style-win.json`、`appearance-win.json` 仅由 Python 管理。Go 只写自己目录下的 `style-web.json`、`appearance-web.json`。
 
 ## Windows v0.8.0：无黑框托盘模式与新手配置向导
 
 - **Windows 发行包**使用 `-H=windowsgui` 构建，双击 EXE 不再弹出黑色终端窗口；服务后台运行，在任务栏右下角系统托盘（或折叠的隐藏图标区）显示 BiliPDJ Go 图标。
 - 程序监听端口成功后，自动在系统默认浏览器打开 Web 管理界面。**双击托盘图标**再次打开界面；**右键托盘图标**可打开界面或**退出程序**。仅关闭浏览器标签页不会终止后台服务。
 - **新安装首次打开网页**会出现可跳过的分步向导：B站、抖音启用和直播间地址、B站扫码登录、排队关键词、队列上限与每日次数限制。完成或跳过写入当前数据目录 `state.json`；以后不会自动打扰。升级已配置的旧版本默认跳过向导；需要时使用侧边栏底部的「新手配置引导」重新打开。
-- **数据存放（v0.10.1，兼容 Python PR #314）**：Windows 默认 `%APPDATA%\bilipdj`，Linux 默认 `~/.local/share/bilipdj`（优先绝对路径 `$XDG_DATA_HOME`），macOS 默认 `~/Library/Application Support/bilipdj`；旧程序目录里的 `data/state.json` 会 COPY-only 迁移。两份不同来源同时存在时保持旧目录，Web 弹框要求明确选择并重启。`-data` 或 `BILIPDJ_DATA_DIR` 完全保留显式路径（Docker `/data` 不变）。
+- **Go 独立数据目录**：Windows `%APPDATA%\bilipdj-go`（配置）和 `%LOCALAPPDATA%\bilipdj-go`（队列/备份/缓存），Linux `~/.local/share/bilipdj-go`，macOS `~/Library/Application Support/bilipdj-go`。已识别的旧 Go 状态 COPY-only 迁移，不动 Python `bilipdj`；显式 `-data` / `BILIPDJ_DATA_DIR` 不变。
 - 从源码手动编译 Windows 无黑框版本：`go build -ldflags="-H=windowsgui" -o bilipdj-go.exe .`。普通 `go run .` 不会自动启用 GUI 子系统。Linux/macOS/Docker 保持控制台运行，不主动打开浏览器。
 - 如果托盘图标没有直接显示，请点击任务栏右下角的「显示隐藏的图标」。目前使用 Windows 通用应用图标；将在后续版本添加独立品牌图标。此模式仍需在真实 Windows 桌面验收托盘菜单与浏览器打开行为。
 
