@@ -14,14 +14,14 @@ BiliPDJ-Go 内置 Model Context Protocol (MCP) 工具服务器，可供支持 MC
 {
   "mcpServers": {
     "bilipdj-go": {
-      "command": "C:\\path\\to\\bilipdj-go.exe",
+      "command": "C:\\path\\to\\bilipdj-go-mcp.exe",
       "args": ["--mcp-stdio"]
     }
   }
 }
 ```
 
-macOS/Linux 将 command 换成本机 Go 二进制的**绝对路径**。若 BiliPDJ-Go 不是默认端口，可给 stdio 桥接配置环境变量 `BILIPDJ_MCP_URL=http://127.0.0.1:9817/mcp`。客户端不应尝试使用 `go run . --mcp-stdio` 代替正式路径（启动器可能将诊断写入 stdout）。
+Windows 打包内提供两个可执行文件：`bilipdj-go.exe` 为无控制台窗口的主程序；`bilipdj-go-mcp.exe` 为专门提供标准输入/标准输出管道的命令行程序，AI 客户端请使用后者的 **绝对路径**并传入 `--mcp-stdio`。macOS/Linux 将 command 换成本机 `bilipdj-go` 二进制的**绝对路径**。若 BiliPDJ-Go 不是默认端口，可给 stdio 桥接配置环境变量 `BILIPDJ_MCP_URL=http://127.0.0.1:9817/mcp`。客户端不应尝试使用 `go run . --mcp-stdio` 代替正式路径（启动器可能将诊断写入 stdout）。
 
 兼容 MCP 2025-03-26、2025-06-18、2025-11-25（传统 initialize）及 2026-07-28（无状态 per-request metadata + `server/discover`），HTTP 为 JSON-RPC 单次响应，不提供 GET/SSE 订阅；对于只需要 tools/list 和 tools/call 的客户端无需长连接。
 
@@ -95,3 +95,8 @@ curl -s -X POST http://127.0.0.1:9816/mcp \
 - 支持本机 stdio 或经鉴权的 HTTP，云端 AI 需要对本机建立可信网络连接；不能只填写一个私有 `127.0.0.1` 地址就让云端服务接入。
 - 工具返回最近消息与队列包含直播用户公开昵称和用户 ID，请按数据用途管理第三方模型权限。
 - 生产部署建议为写令牌配置较高随机强度并定期轮换；丢失令牌不能通过 MCP 找回。
+
+
+## 预览版打包（尚非正式发行）
+
+MCP PR #3 在 GitHub Actions 的 **Build and Release** 检查通过后，会于该次运行的 **Artifacts** 区提供六平台 ZIP 包：Windows/Linux/macOS 各 amd64、arm64。所有预览 ZIP 都包含 README、许可证、NOTICE、第三方声明及 `docs/MCP.md`；Windows 包额外附带不隐藏标准输入输出管道的 `bilipdj-go-mcp.exe`。压缩包附有对应的 `*.zip.sha256` 校验文件；GitHub Actions 产物保留 14 天。预览包附带 `PREVIEW_BUILD.txt`，不能将其视为正式 GitHub Release；打包不会创建 tag 或 Release。
