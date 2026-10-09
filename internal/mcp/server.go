@@ -222,6 +222,11 @@ func (s *Server) dispatch(req rpcRequest, canWrite bool, modern bool, requestedV
  default:
   return rpcFail(req.ID,-32601,"method not found")
  }
+ if modern {
+  if _, ok:=result["_meta"]; !ok {
+   result["_meta"]=map[string]any{"io.modelcontextprotocol/serverInfo":map[string]any{"name":"bilipdj-go","version":s.Version}}
+  }
+ }
  reply.Result=result
  return reply
 }
@@ -236,19 +241,33 @@ func (s *Server) ServeHTTP(w http.ResponseWriter,r *http.Request){
  var request rpcRequest
  if e:=json.Unmarshal(raw,&request);e!=nil {respond(w,400,rpcFail(nil,-32700,"parse error"));return}
  if request.JSONRPC!="2.0" || request.Method=="" {respond(w,400,rpcFail(request.ID,-32600,"invalid JSON-RPC request"));return}
- if len(request.ID)>0 && (string(request.ID)=="null" || (!json.Valid(request.ID))) {respond(w,400,rpcFail(nil,-32600,"invalid ID"));return}
+ if len(request.ID)>0 {
+  var id any
+  if json.Unmarshal(request.ID,&id)!=nil {
+   respond(w,400,rpcFail(nil,-32600,"invalid ID"));return
+  }
+  switch id.(type) {
+  case string,float64:
+  default:
+   respond(w,400,rpcFail(nil,-32600,"ID must be a string or number"));return
+  }
+ }
  version:=r.Header.Get("MCP-Protocol-Version")
  modern:=version==ModernVersion
  if version!="" && version!="2025-03-26" && version!=LegacyVersion && version!="2025-11-25" && !modern {respond(w,400,rpcFail(request.ID,-32022,"UnsupportedProtocolVersion"));return}
  if modern {
   var p struct{Meta struct{Version string `json:"io.modelcontextprotocol/protocolVersion"`; Capabilities *json.RawMessage `json:"io.modelcontextprotocol/clientCapabilities"`} `json:"_meta"`; Name string `json:"name"`}
   if e:=json.Unmarshal(request.Params,&p);e!=nil || p.Meta.Version!=ModernVersion || p.Meta.Capabilities==nil {
-   respond(w,400,rpcFail(request.ID,-32600,"missing/mismatched modern MCP _meta"));return
+   respond(w,400,rpcFail(request.ID,-32602,"missing/mismatched modern MCP _meta"));return
   }
   if r.Header.Get("Mcp-Method")!=request.Method || (request.Method=="tools/call" && r.Header.Get("Mcp-Name")!=p.Name){
    respond(w,400,rpcFail(request.ID,-32020,"HeaderMismatch"));return
   }
  }
  if len(request.ID)==0 {w.WriteHeader(http.StatusAccepted);return}
- respond(w,200,s.dispatch(request,write,modern,legacyVersion(request,version)))
+ reply:=s.dispatch(request,write,modern,legacyVersion(request,version))
+ if modern && reply.Error!=nil && reply.Error.Code==-32601 {
+  respond(w,404,reply);return
+ }
+ respond(w,200,reply)
 }
