@@ -116,6 +116,8 @@ type App struct {
 	style         map[string]any
 	appearance    map[string]any
 	messages      []live.Event
+	logs          []LogEntry
+	logSequence   uint64
 	statuses      map[string]live.Status
 	subscribers   map[chan Event]struct{}
 	workers       map[string]context.CancelFunc
@@ -137,6 +139,7 @@ func New(dataDir, version, repo string) *App {
 	a.qrGenerateURL = biliQRGenerateEndpoint
 	a.qrPollURL = biliQRPollEndpoint
 	a.qrNavURL = biliNavEndpoint
+	a.appendLogLocked("INFO", "system", "BiliPDJ Go 已启动，正在读取本地配置")
 	raw, e := os.ReadFile(a.dataPath)
 	if e == nil {
 		var p persisted
@@ -260,7 +263,15 @@ func (a *App) publishLocked(e Event) {
 }
 func (a *App) publishStatus(s live.Status) {
 	a.mu.Lock()
+	previous, exists := a.statuses[s.Platform]
 	a.statuses[s.Platform] = s
+	if !exists || previous.Message != s.Message || previous.Connected != s.Connected {
+		level := "INFO"
+		if !s.Connected && (strings.Contains(s.Message, "失败") || strings.Contains(s.Message, "中断") || strings.Contains(s.Message, "错误")) {
+			level = "ERROR"
+		}
+		a.appendLogLocked(level, s.Platform, s.Message)
+	}
 	a.publishLocked(Event{Type: "status", Data: s})
 	a.mu.Unlock()
 }
@@ -284,6 +295,7 @@ func (a *App) OnDanmu(e live.Event) {
 		a.messages = append([]live.Event{}, a.messages[len(a.messages)-150:]...)
 	}
 	a.publishLocked(Event{Type: "danmu", Data: e})
+	a.appendLogLocked("INFO", e.Platform, e.Username+"："+e.Content)
 	for _, s := range a.config.Blacklist {
 		if strings.EqualFold(strings.TrimSpace(s), e.Username) || s == e.UserID {
 			return
@@ -294,10 +306,17 @@ func (a *App) OnDanmu(e live.Event) {
 			log.Printf("queue persist: %v", err)
 		}
 		a.publishLocked(Event{Type: "queue", Data: a.queue})
+		a.appendLogLocked("INFO", "queue", fmt.Sprintf("%s 排队操作已更新队列，当前 %d 人（槽位 %d）", e.Username, len(a.queue), a.config.ArchiveSlot))
 	}
 
 }
-func (a *App) Start() { a.mu.RLock(); c := a.config; a.mu.RUnlock(); a.apply(c) }
+func (a *App) Start() {
+	a.mu.RLock()
+	c := a.config
+	a.mu.RUnlock()
+	a.apply(c)
+	a.logEvent("INFO", "system", "弹幕监听服务已启动")
+}
 func (a *App) apply(cfg Config) {
 	a.mu.Lock()
 	for _, cancel := range a.workers {
@@ -320,6 +339,7 @@ func (a *App) apply(cfg Config) {
 			go source.Run(ctx, pc.Room, pc.Cookie, a.OnDanmu, a.publishStatus)
 		} else {
 			a.statuses[platform] = live.Status{Platform: platform, Connected: false, Message: "未启用", Since: time.Now()}
+			a.appendLogLocked("INFO", platform, "监听未启用")
 		}
 	}
 	a.mu.Unlock()
@@ -436,6 +456,16 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		send(w, 200, map[string]any{"status": "ok", "version": a.version})
 	})
+	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		a.mu.RLock()
+		logs := append([]LogEntry{}, a.logs...)
+		a.mu.RUnlock()
+		send(w, 200, logs)
+	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
@@ -485,6 +515,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		a.publishLocked(Event{Type: "queue", Data: a.queue})
+		a.appendLogLocked("INFO", "queue", fmt.Sprintf("切换到队列存档 %d，现有 %d 人", a.config.ArchiveSlot, len(a.queue)))
 		send(w, 200, map[string]any{"active_slot": a.config.ArchiveSlot, "slots": a.slotCountsLocked(), "entries": a.queue})
 	})
 	mux.HandleFunc("GET /api/platforms/active", func(w http.ResponseWriter, r *http.Request) {
@@ -544,6 +575,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		a.apply(cfg)
+		a.logEvent("INFO", "system", "配置已保存，平台监听已更新")
 		send(w, 200, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /api/queue", func(w http.ResponseWriter, r *http.Request) {
@@ -580,7 +612,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 				}
 			}
 			a.queue = items
-		case "add":
+		case "add", "insert":
 			name := strings.TrimSpace(req.Name)
 			if name == "" || len([]rune(name)) > 60 {
 				send(w, 400, map[string]string{"error": "用户名无效"})
@@ -591,7 +623,18 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 				return
 			}
 			key := fmt.Sprintf("manual:%d", time.Now().UnixNano())
-			a.queue = append(a.queue, QueueItem{Key: key, Platform: "manual", Username: name, Note: strings.TrimSpace(req.Note), At: time.Now()})
+			item := QueueItem{Key: key, Platform: "manual", Username: name, Note: strings.TrimSpace(req.Note), At: time.Now()}
+			if req.Action == "insert" {
+				if req.Index < 0 || req.Index > len(a.queue) {
+					send(w, 400, map[string]string{"error": "插入位置无效"})
+					return
+				}
+				a.queue = append(a.queue, QueueItem{})
+				copy(a.queue[req.Index+1:], a.queue[req.Index:])
+				a.queue[req.Index] = item
+			} else {
+				a.queue = append(a.queue, item)
+			}
 		case "move":
 			idx := -1
 			for i, q := range a.queue {
@@ -631,6 +674,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		a.publishLocked(Event{Type: "queue", Data: a.queue})
+		a.appendLogLocked("INFO", "queue", fmt.Sprintf("管理操作 %s，当前 %d 人，存档 %d", req.Action, len(a.queue), a.config.ArchiveSlot))
 		send(w, 200, a.queue)
 	})
 	mux.HandleFunc("GET /api/messages", func(w http.ResponseWriter, r *http.Request) {

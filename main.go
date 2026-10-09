@@ -18,7 +18,7 @@ import (
 
 //go:embed web/*
 var ui embed.FS
-var version = "0.6.1"
+var version = "0.7.0"
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:9816", "listen address")
