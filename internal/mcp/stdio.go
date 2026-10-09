@@ -18,6 +18,10 @@ import (
 // RunStdio relays newline-delimited MCP JSON-RPC messages to an already
 // running BiliPDJ-Go process. It never opens its own state files or live feeds.
 // No non-protocol output is ever written to stdout.
+// MCP tool responses can be much larger than tool arguments, especially
+// when the queue or recent chat contains many messages.
+const maxStdioResponse = 4 << 20
+
 func RunStdio(in io.Reader, out io.Writer) error {
  endpoint:=os.Getenv("BILIPDJ_MCP_URL")
  if endpoint=="" {endpoint="http://127.0.0.1:9816/mcp"}
@@ -64,10 +68,10 @@ func RunStdio(in io.Reader, out io.Writer) error {
    response,e=client.Do(httpReq)
    if e==nil {
     var b []byte
-    b,e=io.ReadAll(io.LimitReader(response.Body,maxRequest+1))
+    b,e=io.ReadAll(io.LimitReader(response.Body,maxStdioResponse+1))
     response.Body.Close()
     if e==nil && response.StatusCode==http.StatusAccepted {cancel();continue}
-    if e==nil && len(b)<=maxRequest && json.Valid(b) {
+    if e==nil && len(b)<=maxStdioResponse && json.Valid(b) {
      if len(req.ID)>0 {
       if _,e=writer.Write(bytes.TrimSpace(b));e==nil {e=writer.WriteByte('\n')}
       if e==nil {e=writer.Flush()}
