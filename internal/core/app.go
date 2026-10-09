@@ -294,6 +294,15 @@ func (a *App) slotCountsLocked() map[string]int {
 	return counts
 }
 func (a *App) publishLocked(e Event) {
+	// Queue events outlive the lock: SSE consumers marshal them after this
+	// function returns while another goroutine may edit a.queue in place.
+	// Keep an immutable snapshot in each queued event to prevent data races
+	// and reporting a different queue than the one that was published.
+	if e.Type == "queue" {
+		if entries, ok := e.Data.([]QueueItem); ok {
+			e.Data = append([]QueueItem{}, entries...)
+		}
+	}
 	for ch := range a.subscribers {
 		select {
 		case ch <- e:
