@@ -23,7 +23,7 @@ BiliPDJ-Go 内置 Model Context Protocol (MCP) 工具服务器，可供支持 MC
 
 macOS/Linux 将 command 换成本机 Go 二进制的**绝对路径**。若 BiliPDJ-Go 不是默认端口，可给 stdio 桥接配置环境变量 `BILIPDJ_MCP_URL=http://127.0.0.1:9817/mcp`。客户端不应尝试使用 `go run . --mcp-stdio` 代替正式路径（启动器可能将诊断写入 stdout）。
 
-兼容 MCP 2025-06-18（传统 initialize）及 2026-07-28（无状态 per-request metadata + `server/discover`），HTTP 为 JSON-RPC 单次响应，不提供 GET/SSE 订阅；对于只需要 tools/list 和 tools/call 的客户端无需长连接。
+兼容 MCP 2025-03-26、2025-06-18、2025-11-25（传统 initialize）及 2026-07-28（无状态 per-request metadata + `server/discover`），HTTP 为 JSON-RPC 单次响应，不提供 GET/SSE 订阅；对于只需要 tools/list 和 tools/call 的客户端无需长连接。
 
 ## 安全和权限
 
