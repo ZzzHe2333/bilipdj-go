@@ -145,3 +145,20 @@ func TestReadOnlyNeverReturnsPlatformCookies(t *testing.T){
  code,r:=toolRPC(t,s,"bilipdj_status",map[string]any{},"",false)
  if code!=200||strings.Contains(resultText(t,r),"SESSDATA"){t.Fatal(code,r)}
 }
+
+// Earlier MCP clients may negotiate the final 2025-era protocol revision.
+func TestLegacyVersionNegotiation(t *testing.T) {
+ t.Setenv("BILIPDJ_MCP_WRITE_TOKEN","")
+ s,_:=testServer(t)
+ for _,v:=range []string{"2025-03-26","2025-06-18","2025-11-25"} {
+  payload,_:=json.Marshal(map[string]any{"jsonrpc":"2.0","id":1,"method":"initialize","params":map[string]any{"protocolVersion":v,"capabilities":map[string]any{},"clientInfo":map[string]any{"name":"test","version":"1"}}})
+  req:=httptest.NewRequest("POST","http://127.0.0.1:9816/mcp",bytes.NewReader(payload))
+  req.Header.Set("Content-Type","application/json")
+  req.RemoteAddr="127.0.0.1:1234"
+  rr:=httptest.NewRecorder();s.ServeHTTP(rr,req)
+  var response struct {Result struct {ProtocolVersion string `json:"protocolVersion"`} `json:"result"`}
+  if err:=json.Unmarshal(rr.Body.Bytes(),&response);err!=nil||rr.Code!=200||response.Result.ProtocolVersion!=v {
+   t.Fatalf("version %s -> %d %s (%v)",v,rr.Code,rr.Body.String(),err)
+  }
+ }
+}
