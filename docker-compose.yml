@@ -7,6 +7,9 @@ services:
     environment:
       # Set a long random token before Docker admin actions can work.
       BILIPDJ_ADMIN_TOKEN: ${BILIPDJ_ADMIN_TOKEN:?Set BILIPDJ_ADMIN_TOKEN in .env}
+      # Separate scope-limited Bearer tokens for AI MCP clients. Optional.
+      BILIPDJ_MCP_READ_TOKEN: ${BILIPDJ_MCP_READ_TOKEN:-}
+      BILIPDJ_MCP_WRITE_TOKEN: ${BILIPDJ_MCP_WRITE_TOKEN:-}
     ports:
       - "127.0.0.1:9816:9816"
     volumes:
