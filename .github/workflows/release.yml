@@ -3,7 +3,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-# Official release pipeline: only main pushes and explicit manual runs.
+    inputs:
+      publish:
+        description: "Explicitly publish a GitHub Release (otherwise only build artifacts)"
+        type: boolean
+        required: true
+        default: false
+# On main push and default manual dispatch, build packages but never publish.
 # MCP PR artifacts use the separate mcp-preview.yml pipeline.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
@@ -27,7 +33,7 @@ jobs:
           test "$(sed -n 's/^var version = \"\([^\"]*\)\"/\1/p' main.go)" = "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Reject publishing an existing version
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
         shell: bash
         run: |
           if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
@@ -89,7 +95,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   release:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true
     needs: [test, build]
     runs-on: ubuntu-latest
     steps:
