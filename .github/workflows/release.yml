@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+# Official release pipeline: only main pushes and explicit manual runs.
+# MCP PR artifacts use the separate mcp-preview.yml pipeline.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: write
 jobs:
@@ -29,7 +34,10 @@ jobs:
             echo "Version tag already exists; increment VERSION instead of overwriting an existing Release"
             exit 1
           fi
-      - run: go test ./... && go vet ./...
+      - name: Unit tests and static analysis
+        run: go test ./... && go vet ./...
+      - name: Race detector (MCP and concurrent queue activity)
+        run: go test -race ./...
   build:
     needs: test
     runs-on: ubuntu-latest
@@ -59,8 +67,17 @@ jobs:
           LDFLAGS="-s -w -X main.version=${RELEASE_TAG#v}"
           [[ "$GOOS" == windows ]] && LDFLAGS="$LDFLAGS -H=windowsgui"
           CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go${EXT}" .
+          if [[ "$GOOS" == windows ]]; then
+            # A dedicated console-subsystem executable guarantees redirected
+            # stdin/stdout pipes for AI clients using --mcp-stdio. The regular
+            # executable remains GUI-subsystem with no black console.
+            CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${RELEASE_TAG#v}" -o "dist/package/bilipdj-go-mcp.exe" .
+          fi
           cp README.md LICENSE NOTICE.md dist/package/
-          cp -r third_party dist/package/
+          cp -r third_party docs dist/package/
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            printf "BiliPDJ-Go MCP PREVIEW BUILD (not a release)\\nPR: #3\\nCommit: %s\\nVersion baseline: %s\\nNo GitHub tag or official Release is created by this workflow run.\\n" "$GITHUB_SHA" "${RELEASE_TAG#v}" > dist/package/PREVIEW_BUILD.txt
+          fi
           (cd dist/package && zip -q -r "../bilipdj-go-${GOOS}-${GOARCH}.zip" .)
           (cd dist && sha256sum "bilipdj-go-${GOOS}-${GOARCH}.zip" > "bilipdj-go-${GOOS}-${GOARCH}.zip.sha256")
       - uses: actions/upload-artifact@v4
@@ -69,6 +86,8 @@ jobs:
           path: |
             dist/*.zip
             dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
   release:
     if: github.event_name == 'workflow_dispatch'
     needs: [test, build]

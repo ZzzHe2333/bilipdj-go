@@ -1,0 +1,96 @@
+name: MCP Preview Packages
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-preview-\${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: Check version consistency
+        shell: bash
+        run: |
+          V=$(tr -d '\r\n' < VERSION)
+          test "$(sed -n 's/^var version = \"\([^\"]*\)\"/\1/p' main.go)" = "$V"
+      - name: Unit tests
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Race detection
+        run: go test -race ./...
+
+  preview:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows, arch: amd64 }
+          - { os: windows, arch: arm64 }
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: arm64 }
+          - { os: darwin, arch: amd64 }
+          - { os: darwin, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: Build preview ZIP
+        shell: bash
+        env:
+          GOOS: \${{ matrix.os }}
+          GOARCH: \${{ matrix.arch }}
+          PR_NUMBER: \${{ github.event.pull_request.number }}
+          PR_SHA: \${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/package
+          EXT=""
+          if [[ "$GOOS" == windows ]]; then EXT=".exe"; fi
+          BASE_VERSION="$(tr -d '\r\n' < VERSION)"
+          LDFLAGS="-s -w -X main.version=$BASE_VERSION"
+          if [[ "$GOOS" == windows ]]; then LDFLAGS="$LDFLAGS -H=windowsgui"; fi
+          CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go\${EXT}" .
+          if [[ "$GOOS" == windows ]]; then
+            CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$BASE_VERSION" -o dist/package/bilipdj-go-mcp.exe .
+          fi
+          cp README.md LICENSE NOTICE.md dist/package/
+          cp -r docs third_party dist/package/
+          printf 'MCP Preview build (NOT A RELEASE)\nPull request: #%s\nCommit: %s\nBase version: %s\n' "$PR_NUMBER" "$PR_SHA" "$BASE_VERSION" > dist/package/PREVIEW_BUILD.txt
+          ZIP="bilipdj-go-mcp-preview-pr\${PR_NUMBER}-\${GOOS}-\${GOARCH}.zip"
+          (cd dist/package && zip -q -r "../$ZIP" .)
+          (cd dist && sha256sum "$ZIP" > "$ZIP.sha256")
+          test -s "dist/$ZIP"
+          (cd dist && sha256sum -c "$ZIP.sha256")
+      - name: Upload preview ZIP and checksum (14 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-preview-\${{ matrix.os }}-\${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          retention-days: 14
+          if-no-files-found: error

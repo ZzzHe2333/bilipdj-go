@@ -60,3 +60,25 @@ func TestHTTPAndSecurity(t *testing.T) {
 		t.Fatalf("queue HTTP: %v %+v", e, items)
 	}
 }
+
+
+func TestQueueEventsAreImmutableSnapshots(t *testing.T) {
+	a := New(t.TempDir(), "0.10.1", "org/demo")
+	events := make(chan Event, 1)
+	a.mu.Lock()
+	a.subscribers[events] = struct{}{}
+	a.queue = []QueueItem{{Key: "douyin:123", Platform: "douyin", Username: "before"}}
+	a.publishLocked(Event{Type: "queue", Data: a.queue})
+	// In-place edits after publishing must never change a queued SSE event.
+	a.queue[0].Username = "after"
+	a.mu.Unlock()
+	select {
+	case event := <-events:
+		entries, ok := event.Data.([]QueueItem)
+		if !ok || len(entries) != 1 || entries[0].Username != "before" {
+			t.Fatalf("mutable queue event leaked: %+v", event.Data)
+		}
+	default:
+		t.Fatal("expected queue event")
+	}
+}
