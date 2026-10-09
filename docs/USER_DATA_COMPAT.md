@@ -1,30 +1,23 @@
-# BiliPDJ Go — Python PR #312 数据兼容
+# BiliPDJ Go — Python PR #314 数据目录兼容
 
-本文件对应 Python 仓库 `ZzzHe2333/bilipdj` PR #312（审阅 head `6aff17a`），只修改 Go 仓库。
+对照 Python 仓库 [PR #314](https://github.com/ZzzHe2333/bilipdj/pull/314) 已合并版本。该 PR 接续 #312，将高频队列和备份从 Roaming 分离。两项目独立维护，不会在后台实时互相覆写队列。
 
-| 环境 | 用户数据默认目录 | Python 日志目录约定 |
-| --- | --- | --- |
-| Windows | `%APPDATA%/bilipdj` | `%LOCALAPPDATA%/bilipdj/log` |
-| macOS | `~/Library/Application Support/bilipdj` | `~/Library/Logs/bilipdj` |
-| Linux | `$XDG_DATA_HOME/bilipdj` 或 `~/.local/share/bilipdj` | `$XDG_STATE_HOME/bilipdj/log` 或 `~/.local/state/bilipdj/log` |
+| 平台 | 配置、Cookie、权限及样式 | 队列 | 备份 | 日志约定 |
+| --- | --- | --- | --- | --- |
+| Windows | `%APPDATA%/bilipdj/` | `%LOCALAPPDATA%/bilipdj/archives/` | `%LOCALAPPDATA%/bilipdj/backups/` | `%LOCALAPPDATA%/bilipdj/log/` |
+| macOS | `~/Library/Application Support/bilipdj/` | 配置目录 `archives/` | 配置目录 `backups/` | `~/Library/Logs/bilipdj/` |
+| Linux | `$XDG_DATA_HOME/bilipdj/`（否则 `~/.local/share/bilipdj/`） | 配置目录 `archives/` | 配置目录 `backups/` | `$XDG_STATE_HOME/bilipdj/log/` |
+| 显式 `-data` / `BILIPDJ_DATA_DIR`，含 Docker | 指定目录 `/data/` | Python `/data/core/cd/`、Go `/data/state.json` | Python `/data/backup/` | 指定目录 `/data/log/` |
 
-Go 暂时只保存最多 500 条内存日志，未提供磁盘日志归档。因此表格的日志路径是供未来归档及 Python 互操作的约定，**不是 Go 已在该目录持久写日志的声明**。
+默认模式下，Go **仅把用户设置写在 Roaming 的 `state.json`**，Go 自有队列与十个槽位保存在 Local 的 `archives/go-queue-state.json`；Python 的多平台共用队列是独立的 `archives/queue_archive_slot_N.csv`（五列带来源平台、操作时间）。不会把 Go JSON 直接当作 Python CSV，也不自动修改 CSV。Go 控制台「数据与存档」提供明确的只读扫描、备份后导入和导出 CSV。
 
-## 数据格式及安全边界
+## 从旧目录迁移
 
-- `state.json`：Go 专有配置、跨平台统一队列及 10 个槽位。不要交给 Python 直接编辑。
-- `core/config.yaml`、`core/cd/queue_archive_slot_N.csv`：Python 专有资料，Go 不自动修改。
-- `.storage-choice.json`：与 PR #312 相同的 `{"schema":1,"choice":"user|legacy"}` 策略文件。Python 与 Go 对 `legacy` 的解析会随各自程序安装位置变化。
-- `style-web.json`、`appearance-web.json`：Go Web/OBS 和 Python Web 的可移植 JSON 外观。Go 不读取/写入 Tk 专属 `*-win.json`。
-- 兼容 Python 5 列 CSV：`序号,id,内容,最后操作时间,来源平台`。同名 B站/抖音用户会保留 `bilibili`/`douyin` 平台来源；但 CSV 不含原始 UID，因此导入后无法恢复 Go 原生 UID，请勿将历史 CSV 用户误作可信已验证 UID。
-- 通过 Web `数据与存档` 页面预览和确认导入 CSV；写入 Go state.json 前先生成 `migration-backup/previous-go-state-*.json`，不修改 Python 文件。导出的 CSV 供手动导入 Python，不执行自动双向同步。
+1. 无显式目录时，保留 #312 的来源选择：只有旧数据，按允许名单复制；双方均有数据且未选择，沿用旧目录并提示选择，重启后切换。不自动按时间覆盖。
+2. 对已选择系统用户目录的用户，将原项目 `core/cd/`、旧 Roaming `core/cd/`、`backup/` 只复制到新的 `archives/` 和 `backups/`；保留来源。如果新路径已有不同文件，报告 `local_conflicts`，**不覆盖**。
+3. Go 旧 `state.json` 同时存有配置与队列。首次分离时，先在 `backups/migration-backup/go-state-before-split-*.json` 备份完整原件，再写入 `archives/go-queue-state.json`。之后配置中保留 `queue_external` 标记；Local 存档丢失或损坏时拒绝以空队列启动。遇到问题需从备份恢复，不自动覆盖。
+4. Go 队列的每次变动触发上一版本保护：按槽位在 `backups/queue/queue_archive_slot_N/` 以 Python 兼容五列 CSV 保存快照；**同一槽位每半小时最多一份，至多保留 96 份 Go 自有 `go-*.csv`**。不会清理 Python 自己的备份。
+5. Go 更新包的下载临时文件使用 Local `cache/`；Roaming 不保存大 ZIP。Go 当前的最多 500 条日志仍为内存缓存，日志目录仅预留给未来的磁盘日志归档。
+6. Windows Tk 的 `style-win.json`、`appearance-win.json` 与 Web/OBS 的 `style-web.json`、`appearance-web.json` 继续完全隔离；Go Web 不修改 `-win` 文件。
 
-## 启动与冲突
-
-1. `-data` 或 `BILIPDJ_DATA_DIR` 显式路径始终有效；容器原有 `/data` 仍在，绝不自动重定向到宿主机或容器 home。
-2. 无显式目录、只有旧程序数据：按白名单复制旧 Go state.json 和 Python 允许的旧文件/目录到 OS 用户目录，旧文件保留，并在用户目录记录 `choice=user`。
-3. 无显式目录、只有 OS 用户目录数据：直接使用 OS 用户目录。
-4. 两份都有数据但没有明确选择：不合并、不比较时间戳、不覆盖；服务启动时沿用 Go 旧 `data/` 路径，Web 弹窗提示选旧目录或新目录。保存选择不会改变运行中进程，需重启。取消时依旧使用旧数据。
-5. 如果 Python PR 已经选好了 `.storage-choice.json`，Go 遵循它，但 Python `legacy` 是 Python 源码/便携目录，Go `legacy` 是 Go 旧 `data/` 目录。建议各自先备份并使用 Web 导入独立状态。
-
-不要让 Python、Go 在运行时将同一个 `state.json` 作为主状态（Python 当前不使用它）；两个后端的不同格式不能被视作自动双向实时同步。不要将配置 Cookie、备份文件及管理 API 公开到公网。
+**明确限制：** 旧路径选为 `legacy` 时沿用原有 `state.json` 全量结构，不拆分；Docker/显式目录也不自动迁移。Python 和 Go 共享目录不等于共享同一队列写入进程，切勿把两个后端设置成同时写相同 JSON/CSV 文件。备份和 Cookie 属于敏感数据，请仅在本地管理界面使用。

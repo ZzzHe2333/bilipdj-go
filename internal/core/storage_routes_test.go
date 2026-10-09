@@ -136,3 +136,49 @@ func TestWebStylesSeparateFromTk(t *testing.T) {
 		t.Fatal("win style must not be written")
 	}
 }
+
+func TestPR314PythonCSVUsesLocalArchiveDirectory(t *testing.T) {
+	root := t.TempDir()
+	roaming := filepath.Join(root, "roaming", "bilipdj")
+	local := filepath.Join(root, "local", "bilipdj", "archives")
+	if err := os.MkdirAll(local, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(local, "queue_archive_slot_1.csv")
+	original := []byte("\xef\xbb\xbf序号,id,内容,最后操作时间,来源平台\n1,LocalUser,,2026-10-09T15:00:00,douyin\n")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(roaming, "0.10.1", "repo")
+	p := storage.Plan{Mode: "managed", Active: roaming, User: roaming, ArchiveDir: local, BackupDir: filepath.Join(root, "local", "bilipdj", "backups")}
+	if err := a.SetStoragePlan(p); err != nil {
+		t.Fatal(err)
+	}
+	h := a.Routes(http.NotFoundHandler())
+	req := httptest.NewRequest("GET", "http://localhost/api/storage/python-queues", nil)
+	req.RemoteAddr = "127.0.0.1:4343"
+	req.Host = "localhost"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "LocalUser") && !strings.Contains(rr.Body.String(), `"1":1`) {
+		t.Fatalf("read local slot %d %s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest("POST", "http://localhost/api/storage/python-queues/import", strings.NewReader("{}"))
+	req.RemoteAddr = "127.0.0.1:4343"
+	req.Host = "localhost"
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("import local slot %d %s", rr.Code, rr.Body.String())
+	}
+	if len(a.queue) != 1 || a.queue[0].Platform != "douyin" {
+		t.Fatalf("lost platform %+v", a.queue)
+	}
+	next, err := os.ReadFile(path)
+	if err != nil || string(next) != string(original) {
+		t.Fatal("Python archive mutated")
+	}
+	if _, err = os.Stat(filepath.Join(local, "go-queue-state.json")); err != nil {
+		t.Fatal("Go queue did not persist in Local", err)
+	}
+}

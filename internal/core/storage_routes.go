@@ -51,25 +51,25 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 			send(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
-		counts, _, err := readPythonQueueSlots(filepath.Dir(a.dataPath))
+		counts, _, err := readPythonQueueSlots(a.pythonCSVDirectory())
 		if err != nil {
 			send(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
-		send(w, 200, map[string]any{"counts": counts, "available": len(counts) > 0, "directory": "core/cd", "read_only": true})
+		send(w, 200, map[string]any{"counts": counts, "available": len(counts) > 0, "directory": a.pythonCSVDirectory(), "read_only": true})
 	})
 	mux.HandleFunc("POST /api/storage/python-queues/import", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
-		counts, slots, err := readPythonQueueSlots(filepath.Dir(a.dataPath))
+		counts, slots, err := readPythonQueueSlots(a.pythonCSVDirectory())
 		if err != nil {
 			send(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
 		if len(slots) == 0 {
-			send(w, 404, map[string]string{"error": "未发现 Python core/cd 存档"})
+			send(w, 404, map[string]string{"error": "未发现 Python 排队 CSV 存档"})
 			return
 		}
 		a.mu.Lock()
@@ -84,6 +84,9 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 		}
 		if len(previous) > 0 {
 			dir := filepath.Join(filepath.Dir(a.dataPath), "migration-backup")
+			if a.storagePlan.Mode == "managed" && a.storagePlan.Active == a.storagePlan.User {
+				dir = filepath.Join(a.storagePlan.BackupDir, "migration-backup")
+			}
 			if err = os.MkdirAll(dir, 0700); err == nil {
 				name := filepath.Join(dir, "previous-go-state-"+time.Now().UTC().Format("20060102T150405.000000000")+".json")
 				err = os.WriteFile(name, previous, 0600)
@@ -143,10 +146,19 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 		w.Write(raw)
 	})
 }
+
+// Modern PR #314 archives/ are authoritative. The legacy portable mode is
+// deliberately unchanged; a standalone test App defaults to core/cd.
+func (a *App) pythonCSVDirectory() string {
+	if a.storagePlan.Mode == "managed" && a.storagePlan.Active == a.storagePlan.User {
+		return a.storagePlan.ArchiveDir
+	}
+	return filepath.Join(filepath.Dir(a.dataPath), "core", "cd")
+}
 func readPythonQueueSlots(dir string) (map[string]int, map[string][]QueueItem, error) {
 	counts := map[string]int{}
 	slots := map[string][]QueueItem{}
-	base := filepath.Join(dir, "core", "cd")
+	base := dir
 	info, err := os.Lstat(base)
 	if os.IsNotExist(err) {
 		return counts, slots, nil

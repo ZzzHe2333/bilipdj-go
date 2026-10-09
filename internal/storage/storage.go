@@ -16,15 +16,20 @@ import (
 const choiceFile = ".storage-choice.json"
 
 type Plan struct {
-	Mode       string `json:"mode"`
-	Legacy     string `json:"legacy"`
-	User       string `json:"user"`
-	Active     string `json:"active"`
-	Choice     string `json:"choice"`
-	Conflict   bool   `json:"conflict"`
-	Migrate    bool   `json:"migrate"`
-	OldHasData bool   `json:"old_has_data"`
-	NewHasData bool   `json:"new_has_data"`
+	Mode       string   `json:"mode"`
+	Legacy     string   `json:"legacy"`
+	User       string   `json:"user"`
+	Active     string   `json:"active"`
+	Choice     string   `json:"choice"`
+	Conflict   bool     `json:"conflict"`
+	Migrate    bool     `json:"migrate"`
+	OldHasData bool     `json:"old_has_data"`
+	NewHasData bool     `json:"new_has_data"`
+	ArchiveDir string   `json:"archive_dir"`
+	BackupDir  string   `json:"backup_dir"`
+	CacheDir   string   `json:"cache_dir"`
+	LogDir     string   `json:"log_dir"`
+	Conflicts  []string `json:"local_conflicts,omitempty"`
 }
 
 // Roots optionally carry a synthetic OS, home and environment to exercise the
@@ -61,6 +66,33 @@ func LogRoot(goos, home string, env map[string]string) string {
 	}
 	return filepath.Join(base, "bilipdj", "log")
 }
+
+// StateRoot holds high-frequency files. Windows keeps them out of Roaming.
+// macOS/Linux place archives/backups under the existing per-user data root.
+func StateRoot(goos, home string, env map[string]string) string {
+	if goos == "windows" {
+		if env["LOCALAPPDATA"] != "" {
+			return filepath.Join(env["LOCALAPPDATA"], "bilipdj")
+		}
+		return filepath.Join(home, "AppData", "Local", "bilipdj")
+	}
+	return UserRoot(goos, home, env)
+}
+func setPaths(p *Plan, goos, home string, env map[string]string) {
+	if p.Mode == "explicit" || p.Active != p.User {
+		p.ArchiveDir = filepath.Join(p.Active, "core", "cd")
+		p.BackupDir = filepath.Join(p.Active, "backup")
+		p.CacheDir = filepath.Join(p.Active, "cache")
+		p.LogDir = filepath.Join(p.Active, "log")
+		return
+	}
+	state := StateRoot(goos, home, env)
+	p.ArchiveDir = filepath.Join(state, "archives")
+	p.BackupDir = filepath.Join(state, "backups")
+	p.CacheDir = filepath.Join(state, "cache")
+	p.LogDir = LogRoot(goos, home, env)
+}
+
 func ExistingUserData(root string) bool {
 	files := []string{"state.json", "core/config.yaml", "core/quanxian.yaml", "core/kaiguan.yaml", "core/blacklist.csv", "core/style-web.json", "style-web.json", "appearance-web.json", "style-win.json", "appearance-win.json", "config.yaml", "style.json", "appearance.json"}
 	for _, p := range files {
@@ -108,6 +140,7 @@ func PlanFor(appDir, legacyData, explicit, goos, home string, env map[string]str
 		p.Active = filepath.Clean(explicit)
 		p.Mode = "explicit"
 		p.Choice = "explicit"
+		setPaths(&p, goos, home, env)
 		return p, nil
 	}
 	p.Mode = "managed"
@@ -129,6 +162,7 @@ func PlanFor(appDir, legacyData, explicit, goos, home string, env map[string]str
 		p.Active = p.Legacy
 	}
 	p.Migrate = p.OldHasData && !p.NewHasData && p.Active == p.User
+	setPaths(&p, goos, home, env)
 	return p, nil
 }
 func readChoice(user string) string {
@@ -204,7 +238,7 @@ func CopyOnly(p Plan, appDir string) (int, error) {
 		if !safeComponents(src, appDir, p.Legacy) {
 			return nil
 		}
-		if !safeComponents(dst, p.User) {
+		if !safeComponents(dst, p.User, p.ArchiveDir, p.BackupDir) {
 			return fmt.Errorf("unsafe destination parent for %s", dst)
 		}
 		if info.Size() > 64<<20 {
@@ -277,7 +311,14 @@ func CopyOnly(p Plan, appDir string) (int, error) {
 			if err != nil {
 				return err
 			}
-			return copyOne(path, filepath.Join(p.User, rel))
+			dst := filepath.Join(p.User, rel)
+			if dir == "core/cd" {
+				dst = filepath.Join(p.ArchiveDir, strings.TrimPrefix(rel, "core"+string(os.PathSeparator)+"cd"+string(os.PathSeparator)))
+			}
+			if dir == "backup" {
+				dst = filepath.Join(p.BackupDir, strings.TrimPrefix(rel, "backup"+string(os.PathSeparator)))
+			}
+			return copyOne(path, dst)
 		})
 		if e != nil {
 			return count, e
@@ -319,4 +360,114 @@ func safeComponents(candidate string, roots ...string) bool {
 		return true
 	}
 	return false
+}
+
+// MigrateLocalState copies Python's legacy queue CSV and backups from Roaming or
+// portable roots to PR #314's local archive directories. It never removes or
+// replaces a source or an existing destination. Divergent files are reported.
+func MigrateLocalState(p *Plan, appDir string) (int, error) {
+	if p.Mode != "managed" || p.Active != p.User {
+		return 0, nil
+	}
+	count := 0
+	seen := map[string]bool{}
+	for _, dir := range []string{p.User, appDir} {
+		for _, spec := range []struct{ src, dst string }{
+			{"core/cd", p.ArchiveDir},
+			{"backup", p.BackupDir},
+			{"backups", p.BackupDir},
+			{"archives", p.ArchiveDir},
+		} {
+			source := filepath.Join(dir, filepath.FromSlash(spec.src))
+			// On macOS/Linux these directories can be identical.
+			if filepath.Clean(source) == filepath.Clean(spec.dst) {
+				continue
+			}
+			info, err := os.Lstat(source)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return count, err
+			}
+			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			err = filepath.WalkDir(source, func(path string, d os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if d.Type()&os.ModeSymlink != 0 {
+					return nil
+				}
+				if d.IsDir() {
+					return nil
+				}
+				if !d.Type().IsRegular() || !safeComponents(path, source) {
+					return nil
+				}
+				rel, err := filepath.Rel(source, path)
+				if err != nil {
+					return err
+				}
+				target := filepath.Join(spec.dst, rel)
+				if !safeComponents(target, spec.dst) {
+					return fmt.Errorf("unsafe local migration target: %s", target)
+				}
+				old, e := os.ReadFile(path)
+				if e != nil {
+					return e
+				}
+				if len(old) > 64<<20 {
+					return fmt.Errorf("local archive exceeds limit: %s", path)
+				}
+				if dstInfo, e := os.Lstat(target); e == nil {
+					if !dstInfo.Mode().IsRegular() {
+						return fmt.Errorf("unsafe existing local archive: %s", target)
+					}
+					newer, e := os.ReadFile(target)
+					if e != nil {
+						return e
+					}
+					if string(old) != string(newer) && !seen[target] {
+						p.Conflicts = append(p.Conflicts, target)
+						seen[target] = true
+					}
+					return nil
+				} else if !os.IsNotExist(e) {
+					return e
+				}
+				if e := os.MkdirAll(filepath.Dir(target), 0700); e != nil {
+					return e
+				}
+				dest, e := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+				if os.IsExist(e) {
+					return nil
+				}
+				if e != nil {
+					return e
+				}
+				_, e = dest.Write(old)
+				ce := dest.Close()
+				if e != nil || ce != nil {
+					os.Remove(target)
+					if e != nil {
+						return e
+					}
+					return ce
+				}
+				count++
+				return nil
+			})
+			if err != nil {
+				return count, err
+			}
+		}
+	}
+	for _, dir := range []string{p.ArchiveDir, p.BackupDir, p.CacheDir, p.LogDir} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return count, err
+		}
+	}
+	return count, nil
 }

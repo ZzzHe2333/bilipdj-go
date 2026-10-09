@@ -90,7 +90,8 @@ type QueueItem struct {
 type persisted struct {
 	OnboardingCompleted bool                   `json:"onboarding_completed"`
 	Config              Config                 `json:"config"`
-	Queue               []QueueItem            `json:"queue"`
+	Queue               []QueueItem            `json:"queue,omitempty"`
+	QueueExternal       bool                   `json:"queue_external,omitempty"`
 	Slots               map[string][]QueueItem `json:"slots,omitempty"`
 	DailyPeriod         string                 `json:"daily_period,omitempty"`
 	DailyCounts         map[string]int         `json:"daily_counts,omitempty"`
@@ -124,6 +125,8 @@ type App struct {
 	subscribers         map[chan Event]struct{}
 	workers             map[string]context.CancelFunc
 	dataPath            string
+	queuePath           string
+	queueExternal       bool
 	version             string
 	onboardingCompleted bool
 	repo                string
@@ -160,6 +163,7 @@ func New(dataDir, version, repo string) *App {
 			_ = json.Unmarshal(raw, &keys)
 			_, hasWizardField := keys["onboarding_completed"]
 			a.onboardingCompleted = p.OnboardingCompleted || !hasWizardField
+			a.queueExternal = p.QueueExternal
 			a.config = p.Config
 			a.dailyPeriod = p.DailyPeriod
 			if p.DailyCounts != nil {
@@ -215,14 +219,29 @@ func New(dataDir, version, repo string) *App {
 	}
 	return a
 }
-func (a *App) SetStoragePlan(plan storage.Plan) {
+func (a *App) SetStoragePlan(plan storage.Plan) error {
 	a.storagePlan = plan
+	if plan.Mode == "managed" && plan.Active == plan.User && plan.CacheDir != "" {
+		a.updater.Dir = plan.CacheDir
+	}
+	if err := a.configureLocalQueue(plan); err != nil {
+		return err
+	}
 	a.loadWebAppearanceFiles()
+	return nil
 }
 
 func (a *App) saveLocked() error {
 	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
-	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
+	if err := a.saveQueueLocalLocked(); err != nil {
+		return err
+	}
+	savedQueue, savedSlots := a.queue, a.slots
+	if a.queuePath != "" {
+		savedQueue = nil
+		savedSlots = nil
+	}
+	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: savedQueue, QueueExternal: a.queuePath != "", Slots: savedSlots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}

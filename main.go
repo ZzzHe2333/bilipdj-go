@@ -22,7 +22,7 @@ import (
 
 //go:embed web/*
 var ui embed.FS
-var version = "0.10.0"
+var version = "0.10.1"
 
 func main() {
 	if len(os.Args) >= 3 && os.Args[1] == "--apply-update" {
@@ -64,6 +64,14 @@ func main() {
 		log.Printf("Copied %d user-data files to %s without deleting old files", n, plan.User)
 		plan.Choice = "user"
 	}
+	if plan.Mode == "managed" && plan.Active == plan.User {
+		n, migrateErr := storage.MigrateLocalState(&plan, appDir)
+		if migrateErr != nil {
+			desktopError("存档位置迁移失败（未删除旧文件）：\n" + migrateErr.Error())
+			log.Fatal(migrateErr)
+		}
+		log.Printf("Copied %d legacy queue/backup files to local archives, conflicts=%d", n, len(plan.Conflicts))
+	}
 	path := plan.Active
 	content, err := fs.Sub(ui, "web")
 	if err != nil {
@@ -71,7 +79,10 @@ func main() {
 		log.Fatal(err)
 	}
 	app := core.New(path, version, "ZzzHe2333/bilipdj-go")
-	app.SetStoragePlan(plan)
+	if err := app.SetStoragePlan(plan); err != nil {
+		desktopError("读取 Go 队列存档失败（未覆盖旧数据）：\n" + err.Error())
+		log.Fatal(err)
+	}
 	server := &http.Server{Addr: *listen, Handler: app.Routes(http.FileServer(http.FS(content))), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 65 * time.Second}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {

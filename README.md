@@ -43,6 +43,7 @@ Windows 发行版会自动打开网页；新安装可按首次使用向导配置
 
 - Windows：`%APPDATA%\bilipdj`；macOS：`~/Library/Application Support/bilipdj`；Linux：`$XDG_DATA_HOME/bilipdj`（回退 `~/.local/share/bilipdj`）。Go 自有状态为 `<用户目录>/state.json`，Python 的 `core/config.yaml` 和 `core/cd/` 原样保留；它们不会相互后台同步覆盖。
 - 如果新目录尚未有数据，仅从 Go 项目旧 `data/state.json` 和 Python 旧项目允许的配置/存档复制到新目录，不删除旧数据。已有两份数据时**不以时间戳覆盖**，默认先沿用旧 Go 数据位置；在 Web「数据与存档」选择来源后**重启生效**。显式 `-data` / `BILIPDJ_DATA_DIR` 不受自动迁移影响。
+- PR #314 的存档目录微调：Windows Roaming 保留配置 `state.json`，Local `archives/go-queue-state.json` 保存 Go 队列和十槽位；Python `archives/queue_archive_slot_N.csv` 继续独立。Local `backups/` 保存旧状态安全备份和每槽半小时最多一份的队列快照，`cache/` 存更新下载；Docker `/data` 布局不变。见 [数据目录兼容说明](docs/USER_DATA_COMPAT.md)。
 - 可在「数据与存档」页面直接查看用户目录中的 Python `core/cd/queue_archive_slot_N.csv` 并**手动导入**到 Go 队列（先备份已有 Go state.json）。也支持把当前 Go 槽位导出为 Python 可识别的带 BOM 五列 CSV；Python 原始 CSV 在导入/导出时均不被修改。
 - Web/OBS 样式存入 `style-web.json`、`appearance-web.json`；**绝不由 Go 自动读写 `style-win.json`、`appearance-win.json`**。Go 后端保留自己的 state.json，不实现 Python/Tk 数据库/配置文件直接联机共写。
 - Python PR 仍在开发时，以上是已读取的 PR head 的兼容实现。**同机运行两个后端应使用不同的监听端口，并在修改共享 Web 样式文件时避免同时保存。**
@@ -52,7 +53,7 @@ Windows 发行版会自动打开网页；新安装可按首次使用向导配置
 - **Windows 发行包**使用 `-H=windowsgui` 构建，双击 EXE 不再弹出黑色终端窗口；服务后台运行，在任务栏右下角系统托盘（或折叠的隐藏图标区）显示 BiliPDJ Go 图标。
 - 程序监听端口成功后，自动在系统默认浏览器打开 Web 管理界面。**双击托盘图标**再次打开界面；**右键托盘图标**可打开界面或**退出程序**。仅关闭浏览器标签页不会终止后台服务。
 - **新安装首次打开网页**会出现可跳过的分步向导：B站、抖音启用和直播间地址、B站扫码登录、排队关键词、队列上限与每日次数限制。完成或跳过写入当前数据目录 `state.json`；以后不会自动打扰。升级已配置的旧版本默认跳过向导；需要时使用侧边栏底部的「新手配置引导」重新打开。
-- **数据存放（v0.9.0）**：Windows 默认 `%APPDATA%\bilipdj`，Linux 默认 `~/.local/share/bilipdj`（优先绝对路径 `$XDG_DATA_HOME`），macOS 默认 `~/Library/Application Support/bilipdj`；旧程序目录里的 `data/state.json` 会 COPY-only 迁移。两份不同来源同时存在时保持旧目录，Web 弹框要求明确选择并重启。`-data` 或 `BILIPDJ_DATA_DIR` 完全保留显式路径（Docker `/data` 不变）。
+- **数据存放（v0.10.1，兼容 Python PR #314）**：Windows 默认 `%APPDATA%\bilipdj`，Linux 默认 `~/.local/share/bilipdj`（优先绝对路径 `$XDG_DATA_HOME`），macOS 默认 `~/Library/Application Support/bilipdj`；旧程序目录里的 `data/state.json` 会 COPY-only 迁移。两份不同来源同时存在时保持旧目录，Web 弹框要求明确选择并重启。`-data` 或 `BILIPDJ_DATA_DIR` 完全保留显式路径（Docker `/data` 不变）。
 - 从源码手动编译 Windows 无黑框版本：`go build -ldflags="-H=windowsgui" -o bilipdj-go.exe .`。普通 `go run .` 不会自动启用 GUI 子系统。Linux/macOS/Docker 保持控制台运行，不主动打开浏览器。
 - 如果托盘图标没有直接显示，请点击任务栏右下角的「显示隐藏的图标」。目前使用 Windows 通用应用图标；将在后续版本添加独立品牌图标。此模式仍需在真实 Windows 桌面验收托盘菜单与浏览器打开行为。
 
