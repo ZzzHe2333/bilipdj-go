@@ -162,3 +162,39 @@ func TestLegacyVersionNegotiation(t *testing.T) {
   }
  }
 }
+
+
+func TestModernUnknownMethodAndInvalidIDs(t *testing.T) {
+	t.Setenv("BILIPDJ_MCP_WRITE_TOKEN", "")
+	s, _ := testServer(t)
+	code, r := rpcHTTP(t, s, "unsupported/method", map[string]any{}, 3, "", "127.0.0.1:4", true)
+	if code != 404 || r["error"].(map[string]any)["code"] != float64(-32601) {
+		t.Fatalf("modern unknown method: HTTP %d %+v", code, r)
+	}
+	for _, badID := range []string{`{"a":1}`, `true`, `null`, `[]`} {
+		request := `{"jsonrpc":"2.0","id":` + badID + `,"method":"tools/list","params":{}}`
+		req := httptest.NewRequest("POST", "http://127.0.0.1:9816/mcp", strings.NewReader(request))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "127.0.0.1:9000"
+		rr := httptest.NewRecorder()
+		s.ServeHTTP(rr, req)
+		if rr.Code != 400 {
+			t.Fatalf("bad id %s unexpectedly accepted (HTTP %d)", badID, rr.Code)
+		}
+	}
+}
+
+func TestMCPWritesPersistAcrossRestart(t *testing.T) {
+	t.Setenv("BILIPDJ_MCP_WRITE_TOKEN", "persist-write-token")
+	dir := t.TempDir()
+	a := core.New(dir, "0.10.1", "ZzzHe2333/bilipdj-go")
+	s := New(a.Routes(http.NotFoundHandler()), "0.10.1")
+	if code, r := toolRPC(t, s, "bilipdj_add", map[string]any{"name": "AI 队列成员"}, "persist-write-token", false); code != 200 || r["error"] != nil {
+		t.Fatalf("write failed %d %+v", code, r)
+	}
+	reloaded := core.New(dir, "0.10.1", "ZzzHe2333/bilipdj-go")
+	s2 := New(reloaded.Routes(http.NotFoundHandler()), "0.10.1")
+	if code, r := toolRPC(t, s2, "bilipdj_queue", map[string]any{}, "", false); code != 200 || !strings.Contains(resultText(t, r), "AI 队列成员") {
+		t.Fatalf("queue was not persisted: HTTP %d %+v", code, r)
+	}
+}
