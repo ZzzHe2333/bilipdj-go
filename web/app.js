@@ -10,7 +10,7 @@ createApp({setup(){
  const cookieConfigured=ref({bilibili:false,douyin:false}), messages=ref([]),queue=ref([]),filter=ref('all'),slotInfo=ref({active_slot:1,slots:{}}),selectedSlot=ref(1);
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
- const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null);
+ const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
  const platforms=[{id:'bilibili',name:'Bilibili 直播',placeholder:'直播间号码，如 6'},{id:'douyin',name:'抖音直播',placeholder:'live.douyin.com/xxxx'}];
  const filters=[{id:'all',name:'全部'},{id:'bilibili',name:'B站'},{id:'douyin',name:'抖音'}];
  const logCategoryName=category=>({system:'系统',queue:'排队',bilibili:'B站',douyin:'抖音'})[category]||category;
@@ -55,8 +55,13 @@ createApp({setup(){
  async function addQueue(){if(!newName.value)return;await queueAction({action:'add',name:newName.value});newName.value=''}
  function removeQueue(key){queueAction({action:'remove',key})}
  function clearQueue(){if(window.confirm('确认清空当前全部排队？'))queueAction({action:'clear'})}
- async function checkUpdate(){busy.value=true;try{release.value=await api('/api/update');message('更新检查已完成','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
- async function downloadUpdate(){busy.value=true;try{const r=await api('/api/update/download',{method:'POST',body:'{}'});message(`${r.message}：${r.file}`,'success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
+ async function checkUpdate(){busy.value=true;updateReady.value=null;try{release.value=await api('/api/update?source='+encodeURIComponent(updateSource.value));message('更新检查完成（'+(release.value.source==='accelerated'?'加速线路':'官方线路')+'）','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
+ async function downloadUpdate(){busy.value=true;try{const r=await api('/api/update/download',{method:'POST',body:JSON.stringify({source:updateSource.value})});updateReady.value=r;message('已下载且 SHA-256 校验通过，可安装并重启','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
+ async function installUpdate(){if(!updateReady.value)return;
+  if(!window.confirm('确认安装 '+updateReady.value.version+' 并重启 BiliPDJ Go？\n安装将短暂中断直播监听。旧版程序会保留备份。'))return;
+  busy.value=true;try{const r=await api('/api/update/install',{method:'POST',body:'{}'});message(r.message+'。请等待浏览器自动重新打开；如果失败可从托盘打开或手动启动。','success');updateReady.value=null}
+  catch(e){message('安装未启动：'+e.message,'error')}finally{busy.value=false}}
+
 
  function qrSVG(raw){
   if(!window.PDJQR)throw Error('二维码组件未加载');
@@ -112,5 +117,5 @@ createApp({setup(){
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
  onMounted(()=>{refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
  onUnmounted(()=>{if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
- return {page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,giftStatus,giftNamesText,loadGiftStatus,obsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');

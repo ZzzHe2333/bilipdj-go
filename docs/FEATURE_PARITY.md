@@ -122,3 +122,7 @@
 - 使用 `state.json` 作为 Go 状态，`core/cd/queue_archive_slot_N.csv` 为只读 Python 队列输入；UI 可以手动导入 Go，或下载 Python 五列格式 CSV，**没有实时双写**。
 - OBS/Web 外观使用 `style-web.json` 和 `appearance-web.json`，Tk 的 `*-win.json` 不被 Go 覆盖。
 - Go 磁盘日志和 Python 动态插件仍未迁移。详见 `docs/USER_DATA_COMPAT.md`。
+
+## v0.10.0 更新器迁移
+
+Go Web「软件更新」从仅检查/暂存推进到确认安装、退出后辅助进程替换可执行文件、保留旧版备份、启动健康检查与失败回滚。支持官方 Github Release API，以及因 API 不可达通过第三方 GH-Proxy 获取 Release 更新清单/ZIP 的备选线路。无自动下载/静默安装；Docker 仍手动更新镜像。第三方代理的 SHA-256 只能验证传输一致性，**不能独立证明供应链真实性**。详见 `docs/UPDATER.md`。

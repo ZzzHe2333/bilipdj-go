@@ -74,6 +74,26 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: {path: dist, merge-multiple: true}
+      - name: Generate updater manifest for proxy-only networks
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.test.outputs.version }}
+        run: |
+          python3 - <<'PYMANIFEST'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('dist')
+          packages = {}
+          for pkg in sorted(root.glob('bilipdj-go-*.zip')):
+              digest = hashlib.sha256(pkg.read_bytes()).hexdigest()
+              checksum_file = root / (pkg.name + '.sha256')
+              assert checksum_file.is_file(), pkg.name
+              assert checksum_file.read_text().split()[0].lower() == digest, pkg.name
+              packages[pkg.name] = {'name': pkg.name, 'size': pkg.stat().st_size, 'sha256': digest}
+          assert len(packages) == 6, 'Expected all six architectures'
+          version = os.environ['RELEASE_VERSION']
+          manifest = {'version': version, 'tag_name': 'v'+version, 'packages': packages}
+          (root / 'update-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+          PYMANIFEST
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.test.outputs.version }}
@@ -82,3 +102,4 @@ jobs:
           files: |
             dist/*.zip
             dist/*.sha256
+            dist/update-manifest.json

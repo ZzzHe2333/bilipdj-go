@@ -1,6 +1,6 @@
 # BiliPDJ Go · 轻量直播排队工具
 
-全新独立实现（v0.8.0，技术预览）：**Go 标准库后端 + Vue 3 前端（随程序离线打包）**。参考旧版 BiliPDJ 协议规则但不直接引入 Python 运行时。
+全新独立实现（v0.10.0，技术预览）：**Go 标准库后端 + Vue 3 前端（随程序离线打包）**。参考旧版 BiliPDJ 协议规则但不直接引入 Python 运行时。
 
 ## 本版功能范围
 
@@ -12,10 +12,10 @@
 - **B站扫码登录**：内置离线二维码生成与官方轮询；v0.7.0 修复 `passport.biligame.com` 官方扫码回调，兼容旧版 URL Cookie 和新版 `crossDomain?ticket` → 302 `Set-Cookie`；仅允许固定 HTTPS 官方回调，不跟随外部跳转，通过 `nav` 核验后才保存 Cookie，支持主动退出登录。
 - **旧版 `/ws` WebSocket 只读推送兼容**：推送 `PDJ_STATUS`、`QUEUE_UPDATE`、B站基础 `DANMU_MSG` 与抖音 `DOUYIN_DANMU`；**不允许 WebSocket 客户端执行管理指令**，不宣称所有旧第三方协议完全兼容。
 - **Web UI + OBS**：Vue 3 离线控制台 `http://127.0.0.1:9816/`，OBS `http://127.0.0.1:9816/overlay.html`（建议 800×600）。
-- **更新检查与安全暂存**：检查本仓库 GitHub Release，下载 **匹配系统平台**的 ZIP 并校验对应 `.sha256`，暂存于 `data/updates`。**不会悄悄修改运行中的程序**；用户自行替换并重启。Docker 则更新镜像。
+- **应用内自更新（v0.10.0）**：Web「软件更新」提供检查、官方/第三方加速下载、SHA-256 校验、确认安装并自动重启。临时更新助手在主程序退出后备份原 EXE/二进制并替换；新版启动异常时自动回滚。**仅经管理员主动确认触发安装**；Docker 必须重建或拉取镜像。
 - **Docker / 原生运行**：无需 Python、Node 或外网前端 CDN。
 
-未实现：Python/JS 插件市场、原有 Tk 前端、礼物目录动态价格获取、WebDAV 存档、真正自动替换重启。旧配置支持安全导入，并增加功能开关和最多 10 个原版排队 CSV 槽位读取；仍仅部分功能字段能直接生效；其余原始资料会被完整备份。这仍是新项目技术预览，不宣称原项目全量功能完全兼容。
+未实现：Python/JS 插件市场、原有 Tk 前端、礼物目录动态价格获取、WebDAV 存档。旧配置支持安全导入，并增加功能开关和最多 10 个原版排队 CSV 槽位读取；仍仅部分功能字段能直接生效；其余原始资料会被完整备份。这仍是新项目技术预览，不宣称原项目全量功能完全兼容。
 
 > **重要：** 两平台线上协议可能随时调整。本项目带有报文解析、队列和 API 单测，但离线构建环境下**未进行真实直播间连通性验证**；尤其抖音可能因 Cookie/风控/页面结构变化而无法接入。出现断线时请先看平台状态及日志。
 
@@ -67,7 +67,7 @@ Docker 映射端口到**宿主机** `127.0.0.1:9816`，容器内监听 `0.0.0.0`
 
 ## 版本更新 / 自动打包
 
-GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 标签时编译 Windows / Linux / macOS（AMD64 + ARM64 可用组合），上传 `bilipdj-go-<goos>-<goarch>.zip` 与同名 `.sha256`。软件从 `releases/latest` 检查与暂存更新；发布版本前更新检查可能返回 HTTP 404（正常）。
+GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 标签时编译 Windows / Linux / macOS（AMD64 + ARM64 可用组合），上传 `bilipdj-go-<goos>-<goarch>.zip` 与同名 `.sha256`。软件支持从 `releases/latest` 检查更新。v0.10.0 起 Release 还提供 `update-manifest.json`（六平台 ZIP 的 SHA-256 和大小），当 GitHub API 不可达时，通过可选 GH-Proxy 第三方加速代理获取清单并下载附件。详见 [自更新安全与使用说明](docs/UPDATER.md)。
 
 **保护数据：** Go 版使用当前生效用户数据目录下的 `state.json`。在「平台配置 → 导入旧版配置」选择旧版 `config.yaml` 或含有多个旧版配置文件的 ZIP，可先预览，再确认导入。旧版原件永不被修改；导入时会在 `data/migration-backup/` 保存当前新版状态与旧版原始文件（0600 权限），避免数据不可逆丢失。保存过的 Python/JS 插件不会被执行。
 
@@ -94,8 +94,9 @@ GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 
 - `POST /api/bili/qr/start` / `POST /api/bili/qr/poll`：管理员授权启动扫码及查询状态；扫码登录后验证账号再保存 Cookie。`POST /api/bili/logout` 清除 Cookie。
 - `GET /api/onboarding` / `POST /api/onboarding`：首次使用引导状态和完成/跳过持久化；只允许本机或管理员 Token，POST 仅接受 `{"completed":true}`。
 - `GET /api/events`：`text/event-stream`；事件类型 `danmu`、`queue`、`status`、`gift`。
-- `GET /api/update`：GitHub Release 与可更新状态。
-- `POST /api/update/download`：仅下载并 SHA-256 校验到更新暂存目录，不直接安装。
+- `GET /api/update?source=auto|official|accelerated`：GitHub Release 与可更新状态（需要本机授权）。
+- `POST /api/update/download`：`{"source":"auto"}`，下载并 SHA-256 校验到更新暂存目录；
+- `POST /api/update/install`：管理员确认后安装已验证的暂存包，等待旧进程退出、自动备份并重启；Docker 返回不支持。
 
 管理写操作限本机 loopback+localhost Host 与同源 Origin；Docker 远程地址管理请求必须携带 `X-Admin-Token`，服务使用恒定时间比较验证。日志和读取 API 不返回 Cookie。
 

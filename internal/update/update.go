@@ -9,17 +9,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
-type Asset struct {
-	Name, URL string
-	Size      int64
-}
+// GitHub is always attempted first. The third-party proxy is only a transport
+// option for fixed, repository-scoped URLs. It is NOT a cryptographic signer.
+const ProxyPrefix = "https://gh-proxy.com/"
+const ProxyAlternate = "https://gh-proxy.org/"
+const maxPackage = 250 << 20
+
 type Release struct {
 	Version         string `json:"version"`
 	Current         string `json:"current"`
@@ -28,171 +33,360 @@ type Release struct {
 	URL             string `json:"url"`
 	Notes           string `json:"notes"`
 	HasSHA256       bool   `json:"has_sha256"`
+	Source          string `json:"source"`
 }
 type Downloaded struct {
 	File    string `json:"file"`
 	SHA256  string `json:"sha256"`
+	Version string `json:"version"`
 	Message string `json:"message"`
 }
 type Service struct {
 	Repo, Version, Dir string
-	APIBase            string
+	APIBase            string // httptest-only compatibility
 	Client             *http.Client
 }
 
 func New(repo, version, dir string) *Service {
-	return &Service{Repo: repo, Version: version, Dir: dir, Client: &http.Client{Timeout: 60 * time.Second}}
+	return &Service{Repo: repo, Version: version, Dir: dir, Client: &http.Client{Timeout: 65 * time.Second}}
 }
 
 type ghAsset struct {
 	Name string `json:"name"`
 	URL  string `json:"browser_download_url"`
 	Size int64  `json:"size"`
+	SHA  string `json:"sha256"`
 }
 type ghRelease struct {
 	Tag    string    `json:"tag_name"`
 	Body   string    `json:"body"`
 	Assets []ghAsset `json:"assets"`
+	Source string    `json:"-"`
+}
+type releaseManifest struct {
+	Version  string `json:"version"`
+	Tag      string `json:"tag_name"`
+	Notes    string `json:"notes"`
+	Packages map[string]struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+		SHA  string `json:"sha256"`
+	} `json:"packages"`
 }
 
+func (s *Service) filename() string {
+	return fmt.Sprintf("bilipdj-go-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
+}
 func (s *Service) latestURL() string {
 	if s.APIBase != "" {
-		return strings.TrimSuffix(s.APIBase, "/") + "/releases/latest"
+		return strings.TrimRight(s.APIBase, "/") + "/releases/latest"
 	}
 	return "https://api.github.com/repos/" + s.Repo + "/releases/latest"
 }
-func (s *Service) latest(ctx context.Context) (ghRelease, ghAsset, ghAsset, error) {
-	var release ghRelease
-	req, _ := http.NewRequestWithContext(ctx, "GET", s.latestURL(), nil)
-	req.Header.Set("User-Agent", "bilipdj-go-updater/0.1")
-	resp, e := s.Client.Do(req)
-	if e != nil {
-		return release, ghAsset{}, ghAsset{}, e
+func (s *Service) manifestURL() string {
+	return "https://github.com/" + s.Repo + "/releases/latest/download/update-manifest.json"
+}
+func (s *Service) client() *http.Client {
+	if s.Client != nil {
+		return s.Client
+	}
+	return &http.Client{Timeout: 65 * time.Second}
+}
+func (s *Service) fetch(ctx context.Context, u string, max int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "bilipdj-go-updater/1.0")
+	resp, err := s.client().Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return release, ghAsset{}, ghAsset{}, fmt.Errorf("GitHub Release HTTP %d (仓库可能尚未发布版本)", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	if e = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); e != nil {
-		return release, ghAsset{}, ghAsset{}, e
+	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return nil, err
 	}
-	want := fmt.Sprintf("bilipdj-go-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
+	if int64(len(data)) > max {
+		return nil, errors.New("下载超过体积上限")
+	}
+	return data, nil
+}
+func (s *Service) fetchJSON(ctx context.Context, u string, dest any) error {
+	b, e := s.fetch(ctx, u, 1<<20)
+	if e != nil {
+		return e
+	}
+	return json.Unmarshal(b, dest)
+}
+func validateRepo(r string) bool {
+	return regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(r)
+}
+func (s *Service) releaseAssetURL(tag, name string) string {
+	return "https://github.com/" + s.Repo + "/releases/download/" + url.PathEscape(tag) + "/" + url.PathEscape(name)
+}
+func (s *Service) fromManifest(ctx context.Context) (ghRelease, error) {
+	var manifest releaseManifest
+	var last error
+	loaded := false
+	for _, proxy := range []string{ProxyPrefix, ProxyAlternate} {
+		c, cancel := context.WithTimeout(ctx, 11*time.Second)
+		err := s.fetchJSON(c, proxy+s.manifestURL(), &manifest)
+		cancel()
+		if err == nil {
+			loaded = true
+			break
+		}
+		last = err
+	}
+	if !loaded {
+		return ghRelease{}, fmt.Errorf("GitHub 代理更新清单不可用：%w", last)
+	}
+	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(manifest.Tag) || "v"+manifest.Version != manifest.Tag {
+		return ghRelease{}, errors.New("加速更新清单版本号不合法")
+	}
+	r := ghRelease{Tag: manifest.Tag, Body: manifest.Notes, Source: "accelerated"}
+	for name, item := range manifest.Packages {
+		if !regexp.MustCompile(`^bilipdj-go-(windows|linux|darwin)-(amd64|arm64)\.zip$`).MatchString(name) || item.Name != name || item.Size < 1 || item.Size > maxPackage || !validHash(item.SHA) {
+			continue
+		}
+		r.Assets = append(r.Assets, ghAsset{Name: name, URL: s.releaseAssetURL(r.Tag, name), Size: item.Size, SHA: strings.ToLower(item.SHA)})
+	}
+	return r, nil
+}
+func (s *Service) latest(ctx context.Context, source string) (ghRelease, ghAsset, ghAsset, error) {
+	if !validateRepo(s.Repo) {
+		return ghRelease{}, ghAsset{}, ghAsset{}, errors.New("无效 GitHub 仓库名")
+	}
+	if source != "auto" && source != "official" && source != "accelerated" {
+		return ghRelease{}, ghAsset{}, ghAsset{}, errors.New("无效的下载线路")
+	}
+	var r ghRelease
+	var err error
+	if source == "accelerated" && s.APIBase == "" {
+		r, err = s.fromManifest(ctx)
+	} else {
+		apiCtx := ctx
+		if source == "auto" && s.APIBase == "" {
+			var cancel context.CancelFunc
+			apiCtx, cancel = context.WithTimeout(ctx, 9*time.Second)
+			defer cancel()
+		}
+		err = s.fetchJSON(apiCtx, s.latestURL(), &r)
+		r.Source = "official"
+	}
+	if err != nil && source == "auto" && s.APIBase == "" {
+		r, err = s.fromManifest(ctx)
+	}
+	if err != nil {
+		return ghRelease{}, ghAsset{}, ghAsset{}, fmt.Errorf("检查更新失败：%w", err)
+	}
+	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(r.Tag) {
+		return r, ghAsset{}, ghAsset{}, errors.New("Release 版本格式无效")
+	}
+	name := s.filename()
 	var asset, checksum ghAsset
-	for _, a := range release.Assets {
-		if a.Name == want {
+	for _, a := range r.Assets {
+		if a.Name == name {
 			asset = a
 		}
-		if a.Name == want+".sha256" {
+		if a.Name == name+".sha256" {
 			checksum = a
 		}
 	}
-	return release, asset, checksum, nil
+	if asset.Name != "" && s.APIBase == "" {
+		asset.URL = s.releaseAssetURL(r.Tag, asset.Name)
+	}
+	if checksum.Name != "" && s.APIBase == "" {
+		checksum.URL = s.releaseAssetURL(r.Tag, checksum.Name)
+	}
+	return r, asset, checksum, nil
 }
-func (s *Service) Check(ctx context.Context) (Release, error) {
-	v, asset, sum, e := s.latest(ctx)
-	if e != nil {
-		return Release{}, e
+func validHash(s string) bool { return regexp.MustCompile(`^[a-fA-F0-9]{64}$`).MatchString(s) }
+func semver(v string) ([3]int, error) {
+	var n [3]int
+	p := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	if len(p) != 3 {
+		return n, errors.New("版本号非法")
 	}
-	hasAsset := asset.Name != "" && sum.Name != ""
-	return Release{Version: v.Tag, Current: s.Version, UpdateAvailable: strings.TrimPrefix(v.Tag, "v") != strings.TrimPrefix(s.Version, "v") && hasAsset, Asset: asset.Name, URL: asset.URL, Notes: v.Body, HasSHA256: sum.Name != ""}, nil
+	for i, x := range p {
+		v, e := strconv.Atoi(x)
+		if e != nil || v < 0 {
+			return n, errors.New("版本号非法")
+		}
+		n[i] = v
+	}
+	return n, nil
 }
-func (s *Service) fetch(ctx context.Context, u string, max int64) ([]byte, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
-	req.Header.Set("User-Agent", "bilipdj-go-updater/0.1")
-	r, e := s.Client.Do(req)
+func newer(a, b string) bool {
+	x, e := semver(a)
 	if e != nil {
-		return nil, e
+		return false
 	}
-	defer r.Body.Close()
-	if r.StatusCode != 200 {
-		return nil, fmt.Errorf("download HTTP %d", r.StatusCode)
-	}
-	b, e := io.ReadAll(io.LimitReader(r.Body, max+1))
+	y, e := semver(b)
 	if e != nil {
-		return nil, e
+		return false
 	}
-	if int64(len(b)) > max {
-		return nil, errors.New("下载超出体积上限")
+	for i := 0; i < 3; i++ {
+		if x[i] != y[i] {
+			return x[i] > y[i]
+		}
 	}
-	return b, nil
+	return false
 }
-func (s *Service) Download(ctx context.Context) (Downloaded, error) {
-	version, asset, checksum, e := s.latest(ctx)
+func (s *Service) Check(ctx context.Context, sources ...string) (Release, error) {
+	source := "auto"
+	if len(sources) > 0 && sources[0] != "" {
+		source = sources[0]
+	}
+	r, asset, sum, err := s.latest(ctx, source)
+	if err != nil {
+		return Release{}, err
+	}
+	has := asset.Name != "" && (sum.Name != "" || validHash(asset.SHA))
+	return Release{Version: r.Tag, Current: s.Version, UpdateAvailable: newer(r.Tag, s.Version) && has, Asset: asset.Name, URL: asset.URL, Notes: r.Body, HasSHA256: has, Source: r.Source}, nil
+}
+func (s *Service) downloadCandidate(ctx context.Context, u, source string, max int64) ([]byte, string, error) {
+	candidates := []string{u}
+	if s.APIBase == "" {
+		if source == "accelerated" {
+			candidates = []string{ProxyPrefix + u, ProxyAlternate + u, u}
+		}
+		if source == "auto" {
+			candidates = []string{u, ProxyPrefix + u, ProxyAlternate + u}
+		}
+	}
+	var last error
+	for _, candidate := range candidates {
+		downloadCtx := ctx
+		var cancel context.CancelFunc
+		if len(candidates) > 1 {
+			downloadCtx, cancel = context.WithTimeout(ctx, 13*time.Second)
+		}
+		data, e := s.fetch(downloadCtx, candidate, max)
+		if cancel != nil {
+			cancel()
+		}
+		if e == nil {
+			return data, candidate, nil
+		}
+		last = e
+	}
+	return nil, "", fmt.Errorf("官方及第三方线路均失败：%w", last)
+}
+func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, error) {
+	source := "auto"
+	if len(sources) > 0 && sources[0] != "" {
+		source = sources[0]
+	}
+	r, asset, checksum, e := s.latest(ctx, source)
 	if e != nil {
 		return Downloaded{}, e
 	}
-	if asset.Name == "" || checksum.Name == "" {
-		return Downloaded{}, errors.New("Release 缺少当前系统 ZIP 或 sha256 校验文件，拒绝更新")
+	if !newer(r.Tag, s.Version) {
+		return Downloaded{}, errors.New("当前已是最新版本，拒绝重复安装或降级")
 	}
-	if asset.Size <= 0 || asset.Size > 250<<20 {
-		return Downloaded{}, errors.New("Release ZIP 体积异常")
+	if asset.Name == "" || asset.Size < 1 || asset.Size > maxPackage || (checksum.Name == "" && !validHash(asset.SHA)) {
+		return Downloaded{}, errors.New("Release 缺少当前平台的完整 ZIP 和 SHA-256")
 	}
-	rawHash, e := s.fetch(ctx, checksum.URL, 1<<16)
-	if e != nil {
-		return Downloaded{}, e
+	hash := strings.ToLower(asset.SHA)
+	if checksum.Name != "" {
+		b, _, err := s.downloadCandidate(ctx, checksum.URL, source, 64<<10)
+		if err != nil {
+			return Downloaded{}, err
+		}
+		fields := strings.Fields(string(b))
+		if len(fields) < 1 || !validHash(fields[0]) {
+			return Downloaded{}, errors.New("SHA-256 文件无效")
+		}
+		if len(fields) > 1 && strings.TrimPrefix(fields[1], "*") != asset.Name {
+			return Downloaded{}, errors.New("SHA-256 文件名不符")
+		}
+		if hash != "" && !strings.EqualFold(hash, fields[0]) {
+			return Downloaded{}, errors.New("更新清单与校验文件的 SHA-256 不一致")
+		}
+		hash = strings.ToLower(fields[0])
 	}
-	fields := strings.Fields(string(rawHash))
-	if len(fields) == 0 || len(fields[0]) != 64 {
-		return Downloaded{}, errors.New("无效的 SHA256 文件")
+	if !validHash(hash) {
+		return Downloaded{}, errors.New("缺少有效 SHA-256")
 	}
-	want, e := hex.DecodeString(fields[0])
-	if e != nil || len(want) != sha256.Size {
-		return Downloaded{}, errors.New("校验值无效")
+	// Restrict redirection origins to known GitHub-hosted assets, or to the
+	// user-selected third-party proxy. No other metadata URLs are accepted.
+	if s.APIBase == "" && asset.URL != s.releaseAssetURL(r.Tag, s.filename()) {
+		return Downloaded{}, errors.New("非官方更新包地址")
 	}
-	if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") != asset.Name {
-		return Downloaded{}, errors.New("校验文件名不匹配")
-	}
-	// Stream directly to a temporary file; a failed hash never replaces an existing stage.
 	dir := filepath.Join(s.Dir, "updates")
 	if e = os.MkdirAll(dir, 0700); e != nil {
 		return Downloaded{}, e
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", asset.URL, nil)
-	req.Header.Set("User-Agent", "bilipdj-go-updater/0.1")
-	resp, e := s.Client.Do(req)
-	if e != nil {
-		return Downloaded{}, e
+	candidates := []string{asset.URL}
+	if s.APIBase == "" {
+		if source == "accelerated" {
+			candidates = []string{ProxyPrefix + asset.URL, ProxyAlternate + asset.URL, asset.URL}
+		} else if source == "auto" {
+			candidates = append(candidates, ProxyPrefix+asset.URL, ProxyAlternate+asset.URL)
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return Downloaded{}, fmt.Errorf("download HTTP %d", resp.StatusCode)
+	var downloadErr error
+	for _, u := range candidates {
+		requestCtx := ctx
+		var cancel context.CancelFunc
+		if source == "auto" && s.APIBase == "" && u == asset.URL {
+			requestCtx, cancel = context.WithTimeout(ctx, 20*time.Second)
+		}
+		if cancel != nil {
+			defer cancel()
+		}
+		req, err := http.NewRequestWithContext(requestCtx, "GET", u, nil)
+		if err != nil {
+			return Downloaded{}, err
+		}
+		req.Header.Set("User-Agent", "bilipdj-go-updater/1.0")
+		resp, err := s.client().Do(req)
+		if err != nil {
+			downloadErr = err
+			continue
+		}
+		if resp.StatusCode != 200 {
+			downloadErr = fmt.Errorf("下载 HTTP %d", resp.StatusCode)
+			resp.Body.Close()
+			continue
+		}
+		tmp, err := os.CreateTemp(dir, ".download-*")
+		if err != nil {
+			resp.Body.Close()
+			return Downloaded{}, err
+		}
+		digest := sha256.New()
+		n, err := io.Copy(io.MultiWriter(tmp, digest), io.LimitReader(resp.Body, maxPackage+1))
+		resp.Body.Close()
+		closeErr := tmp.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err == nil && n != asset.Size {
+			err = errors.New("下载大小与 Release 不一致")
+		}
+		if err == nil && n > maxPackage {
+			err = errors.New("下载体积超出上限")
+		}
+		if err == nil && !strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), hash) {
+			err = errors.New("SHA256 不匹配")
+		}
+		if err != nil {
+			os.Remove(tmp.Name())
+			downloadErr = err
+			continue
+		}
+		target := filepath.Join(dir, strings.TrimPrefix(r.Tag, "v")+"-"+asset.Name)
+		if err = os.Rename(tmp.Name(), target); err != nil {
+			os.Remove(tmp.Name())
+			return Downloaded{}, err
+		}
+		return Downloaded{File: target, SHA256: hash, Version: r.Tag, Message: "更新包已验证并下载；可以点击安装并重启"}, nil
 	}
-	tmp, e := os.CreateTemp(dir, ".update-*")
-	if e != nil {
-		return Downloaded{}, e
-	}
-	defer os.Remove(tmp.Name())
-	h := sha256.New()
-	n, e := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, 250<<20+1))
-	if e != nil {
-		tmp.Close()
-		return Downloaded{}, e
-	}
-	if n != asset.Size {
-		tmp.Close()
-		return Downloaded{}, errors.New("下载大小与 Release 不一致")
-	}
-	if !equal(h.Sum(nil), want) {
-		tmp.Close()
-		return Downloaded{}, errors.New("SHA256 不匹配，已拒绝安装")
-	}
-	if e = tmp.Close(); e != nil {
-		return Downloaded{}, e
-	}
-	name := fmt.Sprintf("%s-%s", strings.TrimPrefix(version.Tag, "v"), asset.Name)
-	target := filepath.Join(dir, name)
-	if e = os.Rename(tmp.Name(), target); e != nil {
-		return Downloaded{}, e
-	}
-	return Downloaded{File: target, SHA256: hex.EncodeToString(want), Message: "已校验并暂存更新包；解压替换程序并重启，Docker 请拉取新镜像"}, nil
-}
-func equal(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	var diff byte
-	for i := range a {
-		diff |= a[i] ^ b[i]
-	}
-	return diff == 0
+	return Downloaded{}, fmt.Errorf("更新包所有线路均失败：%w", downloadErr)
 }

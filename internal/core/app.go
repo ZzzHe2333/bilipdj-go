@@ -128,6 +128,9 @@ type App struct {
 	onboardingCompleted bool
 	repo                string
 	updater             *update.Service
+	updateMu            sync.Mutex
+	preparedUpdate      update.Downloaded
+	installAction       func(update.Downloaded) error
 	qrMu                sync.Mutex
 	qrSession           biliQRSession
 	qrClient            *http.Client
@@ -136,6 +139,8 @@ type App struct {
 	qrNavURL            string
 	storagePlan         storage.Plan
 }
+
+func (a *App) SetInstallAction(f func(update.Downloaded) error) { a.installAction = f }
 
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
@@ -735,28 +740,69 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	})
 	mux.HandleFunc("GET /api/events", a.events)
 	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 		defer cancel()
-		v, e := a.updater.Check(ctx)
+		source := r.URL.Query().Get("source")
+		if source == "" {
+			source = "auto"
+		}
+		result, e := a.updater.Check(ctx, source)
 		if e != nil {
 			send(w, 502, map[string]string{"error": e.Error()})
 			return
 		}
-		send(w, 200, v)
+		send(w, 200, result)
 	})
 	mux.HandleFunc("POST /api/update/download", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+		var body struct {
+			Source string `json:"source"`
+		}
+		if e := decode(r, &body); e != nil {
+			send(w, 400, map[string]string{"error": e.Error()})
+			return
+		}
+		a.updateMu.Lock()
+		defer a.updateMu.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
 		defer cancel()
-		result, e := a.updater.Download(ctx)
+		result, e := a.updater.Download(ctx, body.Source)
 		if e != nil {
 			send(w, 502, map[string]string{"error": e.Error()})
 			return
 		}
+		a.preparedUpdate = result
 		send(w, 200, result)
+	})
+	mux.HandleFunc("POST /api/update/install", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		if a.installAction == nil {
+			send(w, 409, map[string]string{"error": "当前运行方式不支持内置更新；Docker 请重建镜像"})
+			return
+		}
+		a.updateMu.Lock()
+		defer a.updateMu.Unlock()
+		staged := a.preparedUpdate
+		if staged.File == "" {
+			send(w, 409, map[string]string{"error": "请先下载并校验更新包"})
+			return
+		}
+		if e := a.installAction(staged); e != nil {
+			send(w, 500, map[string]string{"error": e.Error()})
+			return
+		}
+		a.preparedUpdate = update.Downloaded{}
+		send(w, 200, map[string]string{"status": "restarting", "message": "更新助手已启动，服务即将重启"})
 	})
 	a.qrRoutes(mux)
 	a.wsRoutes(mux)
