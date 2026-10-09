@@ -11,12 +11,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcp-preview-\${{ github.event.pull_request.number || github.ref }}
+  group: mcp-preview-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -24,7 +23,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache: true
+          cache: false
       - name: Check version consistency
         shell: bash
         run: |
@@ -38,7 +37,6 @@ jobs:
         run: go test -race ./...
 
   preview:
-    if: github.event_name == 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -61,10 +59,10 @@ jobs:
       - name: Build preview ZIP
         shell: bash
         env:
-          GOOS: \${{ matrix.os }}
-          GOARCH: \${{ matrix.arch }}
-          PR_NUMBER: \${{ github.event.pull_request.number }}
-          PR_SHA: \${{ github.event.pull_request.head.sha }}
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'manual' }}
+          PR_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           mkdir -p dist/package
@@ -73,14 +71,14 @@ jobs:
           BASE_VERSION="$(tr -d '\r\n' < VERSION)"
           LDFLAGS="-s -w -X main.version=$BASE_VERSION"
           if [[ "$GOOS" == windows ]]; then LDFLAGS="$LDFLAGS -H=windowsgui"; fi
-          CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go\${EXT}" .
+          CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go${EXT}" .
           if [[ "$GOOS" == windows ]]; then
             CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$BASE_VERSION" -o dist/package/bilipdj-go-mcp.exe .
           fi
           cp README.md LICENSE NOTICE.md dist/package/
           cp -r docs third_party dist/package/
-          printf 'MCP Preview build (NOT A RELEASE)\nPull request: #%s\nCommit: %s\nBase version: %s\n' "$PR_NUMBER" "$PR_SHA" "$BASE_VERSION" > dist/package/PREVIEW_BUILD.txt
-          ZIP="bilipdj-go-mcp-preview-pr\${PR_NUMBER}-\${GOOS}-\${GOARCH}.zip"
+          printf 'MCP Preview build (NOT A RELEASE)\nSource PR/manual: %s\nCommit: %s\nBase version: %s\n' "$PR_NUMBER" "$PR_SHA" "$BASE_VERSION" > dist/package/PREVIEW_BUILD.txt
+          ZIP="bilipdj-go-mcp-preview-${PR_NUMBER}-${GOOS}-${GOARCH}.zip"
           (cd dist/package && zip -q -r "../$ZIP" .)
           (cd dist && sha256sum "$ZIP" > "$ZIP.sha256")
           test -s "dist/$ZIP"
@@ -88,7 +86,7 @@ jobs:
       - name: Upload preview ZIP and checksum (14 days)
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-preview-\${{ matrix.os }}-\${{ matrix.arch }}
+          name: mcp-preview-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             dist/*.zip
             dist/*.sha256
