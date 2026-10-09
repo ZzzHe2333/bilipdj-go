@@ -5,7 +5,6 @@ import (
  "encoding/json"
  "net/http"
  "net/http/httptest"
- "os"
  "strings"
  "testing"
  "time"
@@ -146,4 +145,3 @@ func TestReadOnlyNeverReturnsPlatformCookies(t *testing.T){
  code,r:=toolRPC(t,s,"bilipdj_status",map[string]any{},"",false)
  if code!=200||strings.Contains(resultText(t,r),"SESSDATA"){t.Fatal(code,r)}
 }
-var _ = os.Stderr
