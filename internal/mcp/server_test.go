@@ -198,3 +198,34 @@ func TestMCPWritesPersistAcrossRestart(t *testing.T) {
 		t.Fatalf("queue was not persisted: HTTP %d %+v", code, r)
 	}
 }
+
+
+func TestStdioExplicitClientWriteOptIn(t *testing.T) {
+	t.Setenv("BILIPDJ_MCP_READ_TOKEN", "")
+	t.Setenv("BILIPDJ_MCP_WRITE_TOKEN", "server-only-secret")
+	t.Setenv("BILIPDJ_MCP_CLIENT_TOKEN", "")
+	s, _ := testServer(t)
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	t.Setenv("BILIPDJ_MCP_URL", ts.URL+"/mcp")
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
+	listTools := func() int {
+		t.Helper()
+		var out bytes.Buffer
+		if err := RunStdio(strings.NewReader(input), &out); err != nil {
+			t.Fatal(err)
+		}
+		var msg struct{ Result struct{ Tools []any `json:"tools"` } `json:"result"` }
+		if err := json.Unmarshal(out.Bytes(), &msg); err != nil {
+			t.Fatalf("stdio reply %q: %v", out.String(), err)
+		}
+		return len(msg.Result.Tools)
+	}
+	if count := listTools(); count != 4 {
+		t.Fatalf("stdio inherited write privileges without opt-in: %d tools", count)
+	}
+	t.Setenv("BILIPDJ_MCP_CLIENT_TOKEN", "server-only-secret")
+	if count := listTools(); count != 10 {
+		t.Fatalf("stdio write opt-in did not work: %d tools", count)
+	}
+}
