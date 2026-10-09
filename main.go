@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ZzzHe2333/bilipdj-go/internal/core"
+	"github.com/ZzzHe2333/bilipdj-go/internal/mcp"
 	"github.com/ZzzHe2333/bilipdj-go/internal/storage"
 	"github.com/ZzzHe2333/bilipdj-go/internal/update"
 	"io/fs"
@@ -25,6 +26,15 @@ var ui embed.FS
 var version = "0.10.1"
 
 func main() {
+	// MCP stdio connects to the existing server and never opens a second
+	// instance against the same queue files or live rooms.
+	if len(os.Args) == 2 && os.Args[1] == "--mcp-stdio" {
+		if err := mcp.RunStdio(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "BiliPDJ MCP:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) >= 3 && os.Args[1] == "--apply-update" {
 		if err := update.RunHelper(os.Args[2]); err != nil {
 			log.Printf("自更新失败：%v", err)
@@ -83,7 +93,11 @@ func main() {
 		desktopError("读取 Go 队列存档失败（未覆盖旧数据）：\n" + err.Error())
 		log.Fatal(err)
 	}
-	server := &http.Server{Addr: *listen, Handler: app.Routes(http.FileServer(http.FS(content))), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 65 * time.Second}
+	backend := app.Routes(http.FileServer(http.FS(content)))
+	root := http.NewServeMux()
+	root.Handle("/mcp", mcp.New(backend, version))
+	root.Handle("/", backend)
+	server := &http.Server{Addr: *listen, Handler: root, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 65 * time.Second}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
 		desktopError("BiliPDJ Go 无法启动监听服务（可能已有实例在运行）：\n" + err.Error())
