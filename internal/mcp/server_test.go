@@ -229,3 +229,30 @@ func TestStdioExplicitClientWriteOptIn(t *testing.T) {
 		t.Fatalf("stdio write opt-in did not work: %d tools", count)
 	}
 }
+
+
+func TestStdioLargeMessageResult(t *testing.T) {
+	t.Setenv("BILIPDJ_MCP_WRITE_TOKEN", "")
+	t.Setenv("BILIPDJ_MCP_READ_TOKEN", "")
+	t.Setenv("BILIPDJ_MCP_CLIENT_TOKEN", "")
+	payload := strings.Repeat("a", 100<<10)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"content": payload}})
+	})
+	s := New(backend, "0.10.1")
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	t.Setenv("BILIPDJ_MCP_URL", ts.URL+"/mcp")
+	var out bytes.Buffer
+	request := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bilipdj_messages","arguments":{}}}` + "\n"
+	if err := RunStdio(strings.NewReader(request), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() <= 64<<10 || !json.Valid(bytes.TrimSpace(out.Bytes())) {
+		t.Fatalf("large message response was truncated or invalid (length=%d)", out.Len())
+	}
+	var rpc struct{ Error *rpcError `json:"error"` }
+	if err := json.Unmarshal(out.Bytes(), &rpc); err != nil || rpc.Error != nil {
+		t.Fatalf("large tool response error: %+v %v", rpc.Error, err)
+	}
+}
