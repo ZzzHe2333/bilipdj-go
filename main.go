@@ -6,12 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ZzzHe2333/bilipdj-go/internal/core"
+	"github.com/ZzzHe2333/bilipdj-go/internal/storage"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -19,26 +21,47 @@ import (
 
 //go:embed web/*
 var ui embed.FS
-var version = "0.8.0"
+var version = "0.9.0"
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:9816", "listen address")
 	data := flag.String("data", "", "persistent data path")
 	flag.Parse()
-	path := *data
-	if path == "" {
-		if p := os.Getenv("BILIPDJ_DATA_DIR"); p != "" {
-			path = p
-		} else {
-			path = desktopDataDir()
-		}
+	explicit := *data
+	if explicit == "" {
+		explicit = os.Getenv("BILIPDJ_DATA_DIR")
 	}
+	binary, err := os.Executable()
+	if err != nil {
+		binary, _ = filepath.Abs(".")
+	}
+	appDir := filepath.Dir(binary)
+	legacyGo := desktopDataDir()
+	if !filepath.IsAbs(legacyGo) {
+		legacyGo, _ = filepath.Abs(legacyGo)
+	}
+	plan, err := storage.Resolve(appDir, legacyGo, explicit)
+	if err != nil {
+		desktopError(err.Error())
+		log.Fatal(err)
+	}
+	if plan.Migrate {
+		n, migrateErr := storage.CopyOnly(plan, appDir)
+		if migrateErr != nil {
+			desktopError("用户数据迁移失败（旧数据未删除）：\n" + migrateErr.Error())
+			log.Fatal(migrateErr)
+		}
+		log.Printf("Copied %d user-data files to %s without deleting old files", n, plan.User)
+		plan.Choice = "user"
+	}
+	path := plan.Active
 	content, err := fs.Sub(ui, "web")
 	if err != nil {
 		desktopError(err.Error())
 		log.Fatal(err)
 	}
 	app := core.New(path, version, "ZzzHe2333/bilipdj-go")
+	app.SetStoragePlan(plan)
 	server := &http.Server{Addr: *listen, Handler: app.Routes(http.FileServer(http.FS(content))), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 65 * time.Second}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {

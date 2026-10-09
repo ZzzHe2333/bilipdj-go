@@ -1,4 +1,4 @@
-# BiliPDJ Python → Go 迁移差异审核（v0.6.1）
+# BiliPDJ Python → Go 迁移差异审核（v0.9.0）
 
 比对来源：`ZzzHe2333/bilipdj` 默认分支 `now` 的 `apps/server/server.py`、`apps/server/bilibili_protocol.py`、`apps/server/douyin_protocol.py`、`docs/DUAL_UI_MAINTENANCE.md`，与本仓库 `main`。这是**静态代码审查 + 离线回归测试**，**不代表真实直播间的连通性验收**。
 
@@ -114,3 +114,11 @@
 | Cookie 保护 | 保持原版 `/api/config` 行为 | 未输入新 Cookie 时沿用已保存 Cookie；扫码后只在官方确认时保存 |
 
 `POST /api/onboarding` 要求管理员权限且只接受 `completed=true`，不提供重置端点。客户端不能通过该接口修改平台 Cookie。新向导沿用 `POST /api/config` 的安全约束，沿用已有双平台队列和接入协议；**本轮未修改已经正常工作的 B站弹幕鉴权和扫码回调代码**。
+
+## v0.9.0 Python PR #312 兼容补充
+
+- Go 默认数据目录匹配 Windows Roaming、macOS Application Support、Linux XDG；旧数据 COPY-only、冲突选择、不自动删除和覆盖。
+- 显式 `-data` / `BILIPDJ_DATA_DIR` 保留，Docker `/data` 未变化。
+- 使用 `state.json` 作为 Go 状态，`core/cd/queue_archive_slot_N.csv` 为只读 Python 队列输入；UI 可以手动导入 Go，或下载 Python 五列格式 CSV，**没有实时双写**。
+- OBS/Web 外观使用 `style-web.json` 和 `appearance-web.json`，Tk 的 `*-win.json` 不被 Go 覆盖。
+- Go 磁盘日志和 Python 动态插件仍未迁移。详见 `docs/USER_DATA_COMPAT.md`。

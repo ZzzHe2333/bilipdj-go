@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ZzzHe2333/bilipdj-go/internal/live"
+	"github.com/ZzzHe2333/bilipdj-go/internal/storage"
 	"github.com/ZzzHe2333/bilipdj-go/internal/update"
 	"log"
 	"net"
@@ -133,6 +134,7 @@ type App struct {
 	qrGenerateURL       string
 	qrPollURL           string
 	qrNavURL            string
+	storagePlan         storage.Plan
 }
 
 func New(dataDir, version, repo string) *App {
@@ -208,6 +210,11 @@ func New(dataDir, version, repo string) *App {
 	}
 	return a
 }
+func (a *App) SetStoragePlan(plan storage.Plan) {
+	a.storagePlan = plan
+	a.loadWebAppearanceFiles()
+}
+
 func (a *App) saveLocked() error {
 	a.slots[slotKey(a.config.ArchiveSlot)] = append([]QueueItem{}, a.queue...)
 	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
@@ -754,6 +761,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	a.qrRoutes(mux)
 	a.wsRoutes(mux)
 	a.legacyRoutes(mux)
+	a.storageRoutes(mux)
 	mux.HandleFunc("GET /control", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusTemporaryRedirect) })
 	mux.HandleFunc("GET /index", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/overlay.html", http.StatusTemporaryRedirect)

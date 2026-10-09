@@ -23,3 +23,6 @@
 
 .wizard-alert{color:#ffb0b8;background:#40232e;border:1px solid #884758;border-radius:7px;padding:9px 12px;margin:4px 30px 14px}
 @media(max-width:720px){.wizard-alert{margin-left:17px;margin-right:17px}}
+
+/* Storage chooser and Python archive interoperability. */
+.storage-panel{margin:18px 0}.storage-paths{display:grid;gap:10px;margin:16px 0}.storage-paths>div{border:1px solid var(--line);border-radius:9px;padding:12px;background:var(--panel2)}.storage-paths strong{color:var(--dim);display:block;font-size:12px;margin-bottom:5px}.storage-paths code{overflow-wrap:anywhere;font-size:12px;font-family:ui-monospace,Consolas,monospace;white-space:normal}.storage-panel .manual{display:flex;gap:9px;flex-wrap:wrap}

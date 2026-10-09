@@ -34,14 +34,25 @@ go run .
 - OBS：`http://127.0.0.1:9816/overlay.html`
 - 服务：`GET /health`、`GET /api/status`、`GET /api/queue`、`GET /api/events`（SSE）
 
-Windows 发行版会自动打开网页；新安装可按首次使用向导配置或选择跳过。其他系统请手动访问 Web 地址。选择平台、填写直播间号、开启监听并保存，双平台可同时启用。默认 `127.0.0.1:9816` 只允许本机访问；Cookie 将保存在本机 `data/state.json`，请妥善保护该目录（文件权限 0600）。
+Windows 发行版会自动打开网页；新安装可按首次使用向导配置或选择跳过。其他系统请手动访问 Web 地址。选择平台、填写直播间号、开启监听并保存，双平台可同时启用。默认 `127.0.0.1:9816` 只允许本机访问；Cookie 将保存在当前生效的数据目录 `state.json`，请妥善保护该目录（文件权限 0600）。
+
+
+## v0.9.0：兼容 Python PR #312 的目录与存档
+
+与 [Python PR #312](https://github.com/ZzzHe2333/bilipdj/pull/312) 对齐的默认用户目录、COPY-only 迁移和双目录冲突提示见 [数据兼容说明](docs/USER_DATA_COMPAT.md)。只更新 `bilipdj-go`，**没有修改 Python 仓库**。
+
+- Windows：`%APPDATA%\bilipdj`；macOS：`~/Library/Application Support/bilipdj`；Linux：`$XDG_DATA_HOME/bilipdj`（回退 `~/.local/share/bilipdj`）。Go 自有状态为 `<用户目录>/state.json`，Python 的 `core/config.yaml` 和 `core/cd/` 原样保留；它们不会相互后台同步覆盖。
+- 如果新目录尚未有数据，仅从 Go 项目旧 `data/state.json` 和 Python 旧项目允许的配置/存档复制到新目录，不删除旧数据。已有两份数据时**不以时间戳覆盖**，默认先沿用旧 Go 数据位置；在 Web「数据与存档」选择来源后**重启生效**。显式 `-data` / `BILIPDJ_DATA_DIR` 不受自动迁移影响。
+- 可在「数据与存档」页面直接查看用户目录中的 Python `core/cd/queue_archive_slot_N.csv` 并**手动导入**到 Go 队列（先备份已有 Go state.json）。也支持把当前 Go 槽位导出为 Python 可识别的带 BOM 五列 CSV；Python 原始 CSV 在导入/导出时均不被修改。
+- Web/OBS 样式存入 `style-web.json`、`appearance-web.json`；**绝不由 Go 自动读写 `style-win.json`、`appearance-win.json`**。Go 后端保留自己的 state.json，不实现 Python/Tk 数据库/配置文件直接联机共写。
+- Python PR 仍在开发时，以上是已读取的 PR head 的兼容实现。**同机运行两个后端应使用不同的监听端口，并在修改共享 Web 样式文件时避免同时保存。**
 
 ## Windows v0.8.0：无黑框托盘模式与新手配置向导
 
 - **Windows 发行包**使用 `-H=windowsgui` 构建，双击 EXE 不再弹出黑色终端窗口；服务后台运行，在任务栏右下角系统托盘（或折叠的隐藏图标区）显示 BiliPDJ Go 图标。
 - 程序监听端口成功后，自动在系统默认浏览器打开 Web 管理界面。**双击托盘图标**再次打开界面；**右键托盘图标**可打开界面或**退出程序**。仅关闭浏览器标签页不会终止后台服务。
-- **新安装首次打开网页**会出现可跳过的分步向导：B站、抖音启用和直播间地址、B站扫码登录、排队关键词、队列上限与每日次数限制。完成或跳过写入 `data/state.json`；以后不会自动打扰。升级已配置的旧版本默认跳过向导；需要时使用侧边栏底部的「新手配置引导」重新打开。
-- **数据存放**：Windows 新安装默认保存在 EXE 所在目录的 `data/`；如果启动工作目录已有旧版 `data/state.json`，继续使用旧数据。也支持 `-data` 或 `BILIPDJ_DATA_DIR` 自定义目录，迁移前请备份原始 `data/`。
+- **新安装首次打开网页**会出现可跳过的分步向导：B站、抖音启用和直播间地址、B站扫码登录、排队关键词、队列上限与每日次数限制。完成或跳过写入当前数据目录 `state.json`；以后不会自动打扰。升级已配置的旧版本默认跳过向导；需要时使用侧边栏底部的「新手配置引导」重新打开。
+- **数据存放（v0.9.0）**：Windows 默认 `%APPDATA%\bilipdj`，Linux 默认 `~/.local/share/bilipdj`（优先绝对路径 `$XDG_DATA_HOME`），macOS 默认 `~/Library/Application Support/bilipdj`；旧程序目录里的 `data/state.json` 会 COPY-only 迁移。两份不同来源同时存在时保持旧目录，Web 弹框要求明确选择并重启。`-data` 或 `BILIPDJ_DATA_DIR` 完全保留显式路径（Docker `/data` 不变）。
 - 从源码手动编译 Windows 无黑框版本：`go build -ldflags="-H=windowsgui" -o bilipdj-go.exe .`。普通 `go run .` 不会自动启用 GUI 子系统。Linux/macOS/Docker 保持控制台运行，不主动打开浏览器。
 - 如果托盘图标没有直接显示，请点击任务栏右下角的「显示隐藏的图标」。目前使用 Windows 通用应用图标；将在后续版本添加独立品牌图标。此模式仍需在真实 Windows 桌面验收托盘菜单与浏览器打开行为。
 
@@ -58,7 +69,7 @@ Docker 映射端口到**宿主机** `127.0.0.1:9816`，容器内监听 `0.0.0.0`
 
 GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 标签时编译 Windows / Linux / macOS（AMD64 + ARM64 可用组合），上传 `bilipdj-go-<goos>-<goarch>.zip` 与同名 `.sha256`。软件从 `releases/latest` 检查与暂存更新；发布版本前更新检查可能返回 HTTP 404（正常）。
 
-**保护数据：** Go 版使用 `data/state.json`。在「平台配置 → 导入旧版配置」选择旧版 `config.yaml` 或含有多个旧版配置文件的 ZIP，可先预览，再确认导入。旧版原件永不被修改；导入时会在 `data/migration-backup/` 保存当前新版状态与旧版原始文件（0600 权限），避免数据不可逆丢失。保存过的 Python/JS 插件不会被执行。
+**保护数据：** Go 版使用当前生效用户数据目录下的 `state.json`。在「平台配置 → 导入旧版配置」选择旧版 `config.yaml` 或含有多个旧版配置文件的 ZIP，可先预览，再确认导入。旧版原件永不被修改；导入时会在 `data/migration-backup/` 保存当前新版状态与旧版原始文件（0600 权限），避免数据不可逆丢失。保存过的 Python/JS 插件不会被执行。
 
 #### 可直接导入的旧版资料
 
@@ -66,10 +77,10 @@ GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 
 | --- | --- |
 | `core/config.yaml`、`config.yaml` | B站 `roomid`/Cookie、抖音 `live_id`/Cookie 和 enabled、排队上限 `paidui_list_length_max`、管理员与最高管理员名单、舰长名单、每日排队上限和重置时间/已用次数（有限兼容）、语言、当前队列槽位、礼物白名单/电池阈值/插入位置/单礼物资格数；旧版已消费礼物资格不自动搬迁，未实现的配置保留原样备份 |
 | `core/quanxian.yaml`、`core/kaiguan.yaml` | 识别管理员、最高管理员、舰长和黑名单，迁移主要开关（含房管管理及舰长插队） |
-| `style.json` | 完整 JSON 保存在 Go 状态；OBS 端增加字体、行高、字距、间距、描边、序号、自动滚动等映射（仍非原版所有 CSS 动画） |
-| `appearance.json` | 完整 JSON 保存，供后续 Aurora 界面外观继续迁移 |
+| `style.json` / `style-web.json` | 完整 JSON 保存在 Go 状态；OBS 端增加字体、行高、字距、间距、描边、序号、自动滚动等映射（仍非原版所有 CSS 动画） |
+| `appearance.json` / `appearance-web.json` | 完整 JSON 保存，供后续 Aurora 界面外观继续迁移 |
 | `blacklist.csv` | 导入黑名单，并在新排队处理时拦截 |
-| `core/cd/*.csv` | 导入识别到的 1–10 号槽位 CSV，并支持切换和重启恢复 |
+| `core/cd/*.csv` | 导入识别到的 1–10 号槽位 CSV（含第 5 列来源平台），并支持切换和重启恢复 |
 
 如果旧版设置散落在多个文件中，请将这些文件压缩成 ZIP 再导入；仅导入一个 `config.yaml` 不会自动读取同机其他旧版文件。导入前建议停止旧版后端，避免同时使用同一直播间和重复写入资料。
 

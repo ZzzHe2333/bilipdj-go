@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -289,11 +290,33 @@ func queueCSV(data []byte) ([]QueueItem, error) {
 		note := ""
 		if len(row) >= 3 {
 			note = strings.TrimSpace(row[2])
+		} else {
+			// Older two-column archives store "name note" in one field.
+			parts := strings.SplitN(id, " ", 2)
+			id = parts[0]
+			if len(parts) > 1 {
+				note = strings.TrimSpace(parts[1])
+			}
 		}
 		if id == "" {
 			continue
 		}
-		items = append(items, QueueItem{Key: fmt.Sprintf("legacy:%d:%d", idx, len(items)), Platform: "legacy", Username: id, Note: note, At: ts})
+		platform := "legacy"
+		if len(row) >= 5 {
+			if v := strings.TrimSpace(strings.ToLower(row[4])); v != "" {
+				platform = v
+			}
+		}
+		at := ts
+		if len(row) >= 4 && strings.TrimSpace(row[3]) != "" {
+			for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+				if v, err := time.Parse(layout, strings.TrimSpace(row[3])); err == nil {
+					at = v
+					break
+				}
+			}
+		}
+		items = append(items, QueueItem{Key: fmt.Sprintf("legacy:%d:%d", idx, len(items)), Platform: platform, Username: id, Note: note, At: at})
 		if len(items) > 10000 {
 			return nil, errors.New("legacy queue too large")
 		}
@@ -372,8 +395,9 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 	for n := range docs {
 		ordered = append(ordered, n)
 	}
+	sort.Strings(ordered)
 	// Process settings before queue, with priority for a matching active slot.
-	for _, base := range []string{"config.yaml", "quanxian.yaml", "kaiguan.yaml", "style.json", "appearance.json", "blacklist.csv", "queue_archive_state.json"} {
+	for _, base := range []string{"config.yaml", "quanxian.yaml", "kaiguan.yaml", "style.json", "style-web.json", "appearance.json", "appearance-web.json", "blacklist.csv", "queue_archive_state.json"} {
 		for _, n := range ordered {
 			if strings.EqualFold(path.Base(n), base) {
 				m.preview.Files = append(m.preview.Files, n)
@@ -526,12 +550,12 @@ func parseLegacy(name string, body []byte, current Config) (legacyMigration, err
 					applyLegacySwitches(&m.cfg, obj)
 					m.preview.Mapped = append(m.preview.Mapped, "功能开关：总排队/官服/B服/超级/米服/取消/修改")
 					m.preview.Mapped = append(m.preview.Mapped, "舰长插队/房管操作开关")
-				case "style.json", "appearance.json":
+				case "style.json", "appearance.json", "style-web.json", "appearance-web.json":
 					obj := map[string]any{}
 					if e := json.Unmarshal(b, &obj); e != nil {
 						return m, fmt.Errorf("%s: %w", base, e)
 					}
-					if base == "style.json" {
+					if base == "style.json" || base == "style-web.json" {
 						m.style = obj
 					} else {
 						m.appearance = obj
