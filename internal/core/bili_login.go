@@ -77,35 +77,80 @@ func (a *App) biliJSON(ctx context.Context, endpoint, cookie string, result any)
 	}
 	return response, nil
 }
+
+// trustedBiliURL validates the QR image URL; it is not used to authorize
+// network requests to the cross-domain login callback.
 func trustedBiliURL(v string) bool {
 	u, err := url.Parse(v)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" {
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Opaque != "" {
 		return false
 	}
 	h := strings.ToLower(u.Hostname())
 	return h == "bilibili.com" || strings.HasSuffix(h, ".bilibili.com")
 }
 
+// Bilibili's successful QR poll returns a biligame crossDomain link, not the
+// passport.bilibili.com QR image link. Only these exact HTTPS callback origins
+// and paths may trigger a server-side HTTP request; the ticket is a secret.
+func trustedBiliCrossDomain(v string) bool {
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Opaque != "" || u.Fragment != "" {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	if h != "passport.biligame.com" && h != "passport.bilibili.com" {
+		return false
+	}
+	return u.EscapedPath() == "/crossDomain" || u.EscapedPath() == "/x/passport-login/web/crossDomain"
+}
+
+func trustedBiliQRCallback(v string) bool {
+	if trustedBiliCrossDomain(v) {
+		return true
+	}
+	if !trustedBiliURL(v) {
+		return false
+	}
+	u, _ := url.Parse(v)
+	// Historical QR callbacks may use passport.bilibili.com or www.bilibili.com,
+	// but arbitrary Bilibili subdomains are not trusted sources of credentials.
+	host := strings.ToLower(u.Hostname())
+	return host == "passport.bilibili.com" || host == "www.bilibili.com"
+}
+
 var cookieKeys = map[string]bool{"SESSDATA": true, "bili_jct": true, "DedeUserID": true, "DedeUserID__ckMd5": true, "sid": true, "buvid3": true, "buvid4": true}
 
-func cookieFromQR(rawURL string, resp *http.Response) (string, error) {
-	if !trustedBiliURL(rawURL) {
-		return "", errors.New("B站扫码返回了不受信任的跳转地址")
+// Only allow cookies returned by Bilibili's QR flow. Never send a URL,
+// qrcode_key, ticket, or cookie back to the browser or application logs.
+func mergeBiliCookies(dst map[string]string, resp *http.Response) {
+	if resp == nil {
+		return
+	}
+	for _, c := range resp.Cookies() {
+		if cookieKeys[c.Name] && c.Value != "" && c.MaxAge >= 0 && len(c.Value) <= 4096 && !strings.ContainsAny(c.Value, "\r\n;") {
+			dst[c.Name] = c.Value
+		}
+	}
+}
+
+func collectBiliQRValues(rawURL string, resp *http.Response) (map[string]string, error) {
+	if !trustedBiliQRCallback(rawURL) {
+		return nil, errors.New("B站扫码返回了不受信任的跳转地址")
 	}
 	parsed, _ := url.Parse(rawURL)
 	values := map[string]string{}
 	for k, arr := range parsed.Query() {
-		if cookieKeys[k] && len(arr) > 0 && len(arr[0]) <= 4096 && !strings.ContainsAny(arr[0], "\r\n;") {
+		if cookieKeys[k] && len(arr) > 0 && arr[0] != "" && len(arr[0]) <= 4096 && !strings.ContainsAny(arr[0], "\r\n;") {
 			values[k] = arr[0]
 		}
 	}
-	for _, c := range resp.Cookies() {
-		if cookieKeys[c.Name] && len(c.Value) <= 4096 && !strings.ContainsAny(c.Value, "\r\n;") {
-			values[c.Name] = c.Value
-		}
-	}
+	mergeBiliCookies(values, resp)
+	return values, nil
+}
+
+func formatBiliQRCookie(values map[string]string) (string, error) {
 	if values["SESSDATA"] == "" {
-		return "", errors.New("B站未返回 SESSDATA 登录会话，请重新扫码")
+		return "", errors.New("B站已确认扫码，但未获取到 SESSDATA 登录会话；请重新生成二维码")
 	}
 	keys := make([]string, 0, len(values))
 	for k := range values {
@@ -117,6 +162,71 @@ func cookieFromQR(rawURL string, resp *http.Response) (string, error) {
 		parts = append(parts, k+"="+values[k])
 	}
 	return strings.Join(parts, "; "), nil
+}
+
+func cookieFromQR(rawURL string, resp *http.Response) (string, error) {
+	values, err := collectBiliQRValues(rawURL, resp)
+	if err != nil {
+		return "", err
+	}
+	return formatBiliQRCookie(values)
+}
+
+// In Bilibili's newer QR flow the URL contains a one-time ticket instead of
+// session cookies. Set-Cookie is returned by crossDomain (often on an HTTP
+// 302), so following redirects automatically would discard those headers.
+// Use a separate no-redirect client and never request a non-allowlisted URL.
+func (a *App) completeBiliQRCookie(ctx context.Context, rawURL string, poll *http.Response) (string, error) {
+	values, err := collectBiliQRValues(rawURL, poll)
+	if err != nil {
+		return "", err
+	}
+	if values["SESSDATA"] != "" {
+		return formatBiliQRCookie(values)
+	}
+	if !trustedBiliCrossDomain(rawURL) {
+		return "", errors.New("B站扫码成功响应没有登录 Cookie，也不是支持的官方跨域回调")
+	}
+
+	client := *a.biliClient()
+	client.Jar = nil
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	endpoint := rawURL
+	for n := 0; n < 3; n++ {
+		if !trustedBiliCrossDomain(endpoint) {
+			return "", errors.New("B站扫码跨域登录跳转地址不受信任")
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return "", errors.New("B站扫码跨域登录请求无效")
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0.0.0 Safari/537.36")
+		req.Header.Set("Referer", "https://www.bilibili.com/")
+		req.Header.Set("Origin", "https://www.bilibili.com")
+		response, err := client.Do(req)
+		if err != nil {
+			return "", errors.New("B站扫码跨域回调请求失败，请重新扫码")
+		}
+		mergeBiliCookies(values, response)
+		location := response.Header.Get("Location")
+		status := response.StatusCode
+		_ = response.Body.Close()
+		if values["SESSDATA"] != "" {
+			return formatBiliQRCookie(values)
+		}
+		if status < 300 || status >= 400 || location == "" {
+			break
+		}
+		base, _ := url.Parse(endpoint)
+		next, err := url.Parse(location)
+		if err != nil {
+			break
+		}
+		endpoint = base.ResolveReference(next).String()
+	}
+	return formatBiliQRCookie(values)
 }
 
 func (a *App) qrRoutes(mux *http.ServeMux) {
@@ -156,7 +266,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 			send(w, 410, map[string]string{"error": "扫码会话已过期，请重新生成"})
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 		defer cancel()
 		endpoint := a.qrPollURL + "?" + url.Values{"qrcode_key": {key}}.Encode()
 		var reply biliQRResponse
@@ -185,7 +295,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 			send(w, 502, map[string]string{"error": fmt.Sprintf("B站扫码状态异常 code=%d", reply.Data.Code)})
 			return
 		}
-		cookie, e := cookieFromQR(reply.Data.URL, resp)
+		cookie, e := a.completeBiliQRCookie(ctx, reply.Data.URL, resp)
 		if e != nil {
 			send(w, 502, map[string]string{"error": e.Error()})
 			return

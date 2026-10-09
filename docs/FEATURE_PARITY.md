@@ -1,4 +1,4 @@
-# BiliPDJ Python → Go 迁移差异审核（v0.6.0）
+# BiliPDJ Python → Go 迁移差异审核（v0.6.1）
 
 比对来源：`ZzzHe2333/bilipdj` 默认分支 `now` 的 `apps/server/server.py`、`apps/server/bilibili_protocol.py`、`apps/server/douyin_protocol.py`、`docs/DUAL_UI_MAINTENANCE.md`，与本仓库 `main`。这是**静态代码审查 + 离线回归测试**，**不代表真实直播间的连通性验收**。
 
@@ -23,7 +23,7 @@
 | 主题 Aurora | Light/Dark 多 Profile | 导入 JSON、应用部分颜色 | ◐ | 完整主题/profile/编辑器 |
 | OBS 展示 | 队列、CSS、高级样式、动画 | 队列展示、字体/大小/字距/间距/行高/颜色/描边/序号/自动滚动，Vue 可视化编辑部分值 | ◐ | 进一步对齐动画与 CSS 槽位 |
 | 配置迁移 | config/quanxian/kaiguan/style/appearance/CSV | YAML/ZIP 预览/备份、部分字段落地、多槽位导入 | ◐ 保留原始备份，非 100% 功能兼容 | YAML 解析边缘用例与批量迁移测试 |
-| B站扫码登录 | 二维码签发、扫码轮询、Cookie | QR 本地渲染、轮询、账号验证与安全保存/退出 | ◐ 离线回归通过，真实登录待验 | B站手机 App 线上扫码验收 |
+| B站扫码登录 | 二维码签发、扫码轮询、Cookie | QR 本地渲染、兼容 biligame.com 旧版 URL 参数与新版 ticket/302 Set-Cookie、nav 验证并安全保存/退出 | ◐ 回调兼容测试通过，手机扫码待验 | B站手机 App 线上扫码验收 |
 | JS 插件/QuickJS | 插件生命周期、能力沙箱 | 未实现 | ❌ | 设计安全隔离协议，不能直接复用 Python 插件 |
 | Python 插件 | 可信环境动态执行 | 未实现 | ❌ | 可选隔离兼容服务 |
 | 其他平台配置位 | 虎牙/快手/斗鱼/视频号保留槽位 | 尚无配置位 | ❌ | 是否继续预留由需求决定 |
@@ -80,3 +80,9 @@
 | 构建发布 | `VERSION` 统一版本来源、CI 校验 main.go 一致、六平台自动打包 | GitHub Release Tag 已存在时仍需避免重复同版本覆盖，发布流程需版本管理 |
 
 **特别注意：** 用户先前报告的 B站所有节点 WSS/TCP 鉴权 EOF **尚未通过公网实测解决**。扫码登录提供新的会话获取方式，但不是对 EOF 的保证修复。
+
+## v0.6.1 B站扫码确认后 Cookie 丢失修复
+
+用户实测：**手动配置 Cookie 后 B站弹幕流正常**，说明先前鉴权 EOF 在该登录条件下已解决；但 v0.6.0 手机扫码确认后报「不受信任的跳转地址」。根因是回调合法性校验只接受 `*.bilibili.com`，排除了 B站 QR 成功响应中的官方 `passport.biligame.com`。同时 2026 年新增 `crossDomain?ticket=...` 格式，必须请求票据回调并从首跳 HTTP 302 `Set-Cookie` 取回 SESSDATA 等 Cookie。
+
+本版限定官方 HTTPS 回调域名与固定路径，禁止自动跟随恶意跳转；兼容旧版查询字符串凭据与新版票据。仅 `nav` 返回 `isLogin` 与有效 `mid` 后落盘；扫码失败时维持旧 Cookie，不改动当前正常的弹幕接收协议。测试覆盖旧 URL、新 ticket/302、多域名拦截、外部重定向拒绝以及成功保存。**真实 B站扫码端到端仍需要用户实际验证。**
