@@ -175,14 +175,25 @@ func (s *Server) call(name string, args json.RawMessage, canWrite bool)(any,erro
  }
  return nil,fmt.Errorf("unknown tool %q",name)
 }
-func (s *Server) dispatch(req rpcRequest, canWrite bool, modern bool) rpcReply {
+func legacyVersion(req rpcRequest, header string) string {
+ for _, v := range []string{"2025-03-26","2025-06-18","2025-11-25"} {
+  if header==v {return v}
+ }
+ var p struct{ ProtocolVersion string `json:"protocolVersion"` }
+ _=json.Unmarshal(req.Params,&p)
+ for _, v := range []string{"2025-03-26","2025-06-18","2025-11-25"} {
+  if p.ProtocolVersion==v {return v}
+ }
+ return LegacyVersion
+}
+func (s *Server) dispatch(req rpcRequest, canWrite bool, modern bool, requestedVersion string) rpcReply {
  reply:=rpcReply{JSONRPC:"2.0",ID:req.ID}
  result:=map[string]any{}
  if modern {result["resultType"]="complete"}
  switch req.Method {
  case "initialize":
   if modern {return rpcFail(req.ID,-32601,"initialize is not used in 2026 protocol")}
-  result=map[string]any{"protocolVersion":LegacyVersion,"capabilities":map[string]any{"tools":map[string]any{"listChanged":false}},"serverInfo":map[string]any{"name":"bilipdj-go","version":s.Version}}
+  result=map[string]any{"protocolVersion":requestedVersion,"capabilities":map[string]any{"tools":map[string]any{"listChanged":false}},"serverInfo":map[string]any{"name":"bilipdj-go","version":s.Version}}
  case "server/discover":
   if !modern {return rpcFail(req.ID,-32601,"method not found")}
   result["supportedVersions"]=[]string{ModernVersion}
@@ -228,7 +239,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter,r *http.Request){
  if len(request.ID)>0 && (string(request.ID)=="null" || (!json.Valid(request.ID))) {respond(w,400,rpcFail(nil,-32600,"invalid ID"));return}
  version:=r.Header.Get("MCP-Protocol-Version")
  modern:=version==ModernVersion
- if version!="" && version!=LegacyVersion && !modern {respond(w,400,rpcFail(request.ID,-32022,"UnsupportedProtocolVersion"));return}
+ if version!="" && version!="2025-03-26" && version!=LegacyVersion && version!="2025-11-25" && !modern {respond(w,400,rpcFail(request.ID,-32022,"UnsupportedProtocolVersion"));return}
  if modern {
   var p struct{Meta struct{Version string `json:"io.modelcontextprotocol/protocolVersion"`; Capabilities *json.RawMessage `json:"io.modelcontextprotocol/clientCapabilities"`} `json:"_meta"`; Name string `json:"name"`}
   if e:=json.Unmarshal(request.Params,&p);e!=nil || p.Meta.Version!=ModernVersion || p.Meta.Capabilities==nil {
@@ -239,5 +250,5 @@ func (s *Server) ServeHTTP(w http.ResponseWriter,r *http.Request){
   }
  }
  if len(request.ID)==0 {w.WriteHeader(http.StatusAccepted);return}
- respond(w,200,s.dispatch(request,write,modern))
+ respond(w,200,s.dispatch(request,write,modern,legacyVersion(request,version)))
 }
