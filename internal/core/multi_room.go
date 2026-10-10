@@ -62,16 +62,21 @@ func validateRoomListeners(c *Config) error{
  for _,p:=range configuredListeners(*c){
   if p.Platform!="bilibili"&&p.Platform!="douyin"{return errors.New("仅 B站与抖音支持新增直播间")}
   if p.Platform=="bilibili"&&p.Enabled{biliEnabled++}
+  normalizedRoom:=""
   if p.Room!="" {
    if p.Platform=="bilibili"{
-    if _,e:=live.ValidateBilibiliRoom(p.Room);e!=nil{return fmt.Errorf("B站 %s: %w",p.ID,e)}
+    roomID,e:=live.ValidateBilibiliRoom(p.Room)
+    if e!=nil{return fmt.Errorf("B站 %s: %w",p.ID,e)}
+    normalizedRoom=fmt.Sprint(roomID)
    }else{
-    if _,e:=live.ValidateDouyinRoom(p.Room);e!=nil{return fmt.Errorf("抖音 %s: %w",p.ID,e)}
+    roomID,e:=live.ValidateDouyinRoom(p.Room)
+    if e!=nil{return fmt.Errorf("抖音 %s: %w",p.ID,e)}
+    normalizedRoom=roomID
    }
   }
   if p.Enabled {
-   if p.Room==""{return fmt.Errorf("%s 启用前必须填写直播间号",p.ID)}
-   roomKey:=p.Platform+":"+p.Room
+   if normalizedRoom==""{return fmt.Errorf("%s 启用前必须填写直播间号",p.ID)}
+   roomKey:=p.Platform+":"+normalizedRoom
    if prev,ok:=rooms[roomKey];ok {return fmt.Errorf("同一直播间不可重复监听：%s 和 %s",prev,p.ID)}
    rooms[roomKey]=p.ID
   }
