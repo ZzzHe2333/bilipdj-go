@@ -113,6 +113,16 @@ func (a *App) upsertRoleLocked(platform,name,role string)bool{
  name=strings.TrimSpace(name)
  if name==""||utf8.RuneCountInString(name)>60{return false}
  if a.config.Permissions==nil{a.config.Permissions=legacyPermissions(a.config)}
+ // Mirror old role-name lists for legacy import/export and pre-existing tests.
+ // Structured Permissions remains authoritative for per-platform enforcement.
+ if role=="blacklist"{
+  if !named(a.config.Blacklist,name){a.config.Blacklist=append(a.config.Blacklist,name)}
+  a.config.Admins=removeName(a.config.Admins,name)
+  a.config.SuperAdmins=removeName(a.config.SuperAdmins,name)
+  a.config.Guards=removeName(a.config.Guards,name)
+ }else if role=="admin"&&!named(a.config.Admins,name){
+  a.config.Admins=append(a.config.Admins,name)
+ }
  for i,p:=range a.config.Permissions{
   if p.Platform==platform&&strings.EqualFold(p.Name,name){
    if p.Role==role{return false}
@@ -131,6 +141,8 @@ func (a *App) removeRoleLocked(platform,name,role string)bool{
  for i,p:=range a.config.Permissions{
   if (p.Platform==platform||p.Platform=="all")&&strings.EqualFold(p.Name,name)&&p.Role==role{
    a.config.Permissions=append(a.config.Permissions[:i],a.config.Permissions[i+1:]...)
+   if role=="admin"{a.config.Admins=removeName(a.config.Admins,name)}
+   if role=="blacklist"{a.config.Blacklist=removeName(a.config.Blacklist,name)}
    return true
   }
  }
