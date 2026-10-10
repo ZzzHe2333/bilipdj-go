@@ -126,7 +126,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.test.outputs.version }}
-          target_commitish: e871da5f38f1c5d0d1e567f1b6ebc7dc6c785f41
+          target_commitish: 9513dcfa096211cc5b2d64c64ee0153a16a35982
           name: BiliPDJ Go v${{ needs.test.outputs.version }}
           generate_release_notes: true
           files: |
