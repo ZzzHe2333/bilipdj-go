@@ -70,7 +70,27 @@ type Release struct {
 	URL             string `json:"url"`
 	Notes           string `json:"notes"`
 	HasSHA256       bool   `json:"has_sha256"`
+	Size            int64  `json:"size"`
 	Source          string `json:"source"`
+}
+// DownloadProgress reports bytes from the actual streaming response, not
+// guessed elapsed time. A missing size is not shown as 100%.
+type DownloadProgress struct {
+ Phase string `json:"phase"`
+ Version string `json:"version,omitempty"`
+ Source string `json:"source,omitempty"`
+ DownloadedBytes int64 `json:"downloaded_bytes"`
+ TotalBytes int64 `json:"total_bytes"`
+ Percent float64 `json:"percent"`
+ SpeedBPS float64 `json:"speed_bps"`
+ Message string `json:"message,omitempty"`
+}
+type VersionChoice struct {
+ Version string `json:"version"`
+ Size int64 `json:"size"`
+ Current bool `json:"current"`
+ IsOlder bool `json:"is_older"`
+ HasSHA256 bool `json:"has_sha256"`
 }
 type Downloaded struct {
 	File    string `json:"file"`
@@ -281,7 +301,91 @@ func (s *Service) Check(ctx context.Context, sources ...string) (Release, error)
 		return Release{}, err
 	}
 	has := asset.Name != "" && (sum.Name != "" || validHash(asset.SHA))
-	return Release{Version: r.Tag, Current: s.Version, UpdateAvailable: newer(r.Tag, s.Version) && has, Asset: asset.Name, URL: asset.URL, Notes: r.Body, HasSHA256: has, Source: r.Source}, nil
+	return Release{Version: r.Tag, Current: s.Version, UpdateAvailable: newer(r.Tag, s.Version) && has, Asset: asset.Name, URL: asset.URL, Notes: r.Body, HasSHA256: has, Size:asset.Size, Source: r.Source}, nil
+}
+
+// releasedVersions uses only GitHub Release metadata (no arbitrary URLs).
+// The proxy sites mirror files but cannot reliably enumerate GitHub's history.
+// Limit the result to the ten newest matching formal releases for this OS.
+func (s *Service) releasedVersions(ctx context.Context) ([]ghRelease,error) {
+ if !validateRepo(s.Repo){return nil,errors.New("无效 GitHub 仓库名")}
+ endpoint:="https://api.github.com/repos/"+s.Repo+"/releases?per_page=40"
+ if s.APIBase!="" {endpoint=strings.TrimRight(s.APIBase,"/")+"/releases?per_page=40"}
+ var rows []struct {
+  Tag string `json:"tag_name"`
+  Body string `json:"body"`
+  Draft bool `json:"draft"`
+  Prerelease bool `json:"prerelease"`
+  Assets []ghAsset `json:"assets"`
+ }
+ c,cancel:=context.WithTimeout(ctx,15*time.Second)
+ defer cancel()
+ bytes,err:=s.fetch(c,endpoint,4<<20)
+ if err!=nil{return nil,fmt.Errorf("无法读取历史版本列表（需要访问 GitHub API）：%w",err)}
+ if err=json.Unmarshal(bytes,&rows);err!=nil{return nil,err}
+ out:=make([]ghRelease,0,10)
+ seen:=make(map[string]bool)
+ name:=s.filename()
+ for _,r:=range rows{
+  if r.Draft||r.Prerelease||!regexp.MustCompile(`^v[0-9]+.[0-9]+.[0-9]+$`).MatchString(r.Tag)||seen[r.Tag] {continue}
+  found,hasSum:=false,false
+  for _,a:=range r.Assets{
+   if a.Name==name&&a.Size>0&&a.Size<=maxPackage {found=true}
+   if a.Name==name+".sha256" {hasSum=true}
+  }
+  if !found||!hasSum {continue}
+  seen[r.Tag]=true
+  out=append(out,ghRelease{Tag:r.Tag,Body:r.Body,Assets:r.Assets,Source:"official"})
+  if len(out)==10 {break}
+ }
+ return out,nil
+}
+
+func (s *Service) Versions(ctx context.Context)([]VersionChoice,error){
+ rows,err:=s.releasedVersions(ctx)
+ if err!=nil{return nil,err}
+ out:=make([]VersionChoice,0,len(rows))
+ for _,r:=range rows{
+  for _,a:=range r.Assets{
+   if a.Name==s.filename(){
+    out=append(out,VersionChoice{Version:r.Tag,Size:a.Size,Current:"v"+s.Version==r.Tag,IsOlder:newer(s.Version,r.Tag),HasSHA256:true})
+    break
+   }
+  }
+ }
+ return out,nil
+}
+
+func findAsset(r ghRelease,name string,service *Service)(ghAsset,ghAsset){
+ var asset,checksum ghAsset
+ for _,a:=range r.Assets{
+  if a.Name==name{asset=a}
+  if a.Name==name+".sha256"{checksum=a}
+ }
+ if service.APIBase==""{
+  if asset.Name!="" {asset.URL=service.releaseAssetURL(r.Tag,asset.Name)}
+  if checksum.Name!="" {checksum.URL=service.releaseAssetURL(r.Tag,checksum.Name)}
+ }
+ return asset,checksum
+}
+
+type progressWriter struct {
+ callback func(DownloadProgress)
+ snapshot DownloadProgress
+ started time.Time
+ last time.Time
+}
+func (w *progressWriter) Write(data []byte)(int,error){
+ n:=len(data)
+ w.snapshot.DownloadedBytes+=int64(n)
+ now:=time.Now()
+ if now.Sub(w.last)>=180*time.Millisecond||w.snapshot.DownloadedBytes>=w.snapshot.TotalBytes{
+  if w.snapshot.TotalBytes>0 {w.snapshot.Percent=100*float64(w.snapshot.DownloadedBytes)/float64(w.snapshot.TotalBytes)}
+  if elapsed:=now.Sub(w.started).Seconds();elapsed>0{w.snapshot.SpeedBPS=float64(w.snapshot.DownloadedBytes)/elapsed}
+  if w.callback!=nil {w.callback(w.snapshot)}
+  w.last=now
+ }
+ return n,nil
 }
 func (s *Service) downloadCandidate(ctx context.Context, u, source string, max int64) ([]byte, string, error) {
  candidates := sourceCandidates(u, source, s.APIBase != "")
@@ -297,21 +401,43 @@ func (s *Service) downloadCandidate(ctx context.Context, u, source string, max i
 }
 
 func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, error) {
+ return s.DownloadVersion(ctx,"",false,nil,sources...)
+}
+
+// DownloadVersion accepts only a server-listed recent formal release; a
+// downgrade requires explicit opt-in and never bypasses SHA256 validation.
+func (s *Service) DownloadVersion(ctx context.Context, target string, allowDowngrade bool, report func(DownloadProgress), sources ...string) (Downloaded, error) {
 	source := "auto"
 	if len(sources) > 0 && sources[0] != "" {
 		source = sources[0]
 	}
-	r, asset, checksum, e := s.latest(ctx, source)
-	if e != nil {
-		return Downloaded{}, e
+	if report!=nil{report(DownloadProgress{Phase:"checking",Version:target,Message:"正在读取版本信息与 SHA256 校验文件"})}
+	var r ghRelease
+	var asset,checksum ghAsset
+	var e error
+	if target==""{
+		r,asset,checksum,e=s.latest(ctx,source)
+	}else{
+		if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(target){return Downloaded{},errors.New("指定版本号格式无效")}
+		versions,err:=s.releasedVersions(ctx)
+		if err!=nil{return Downloaded{},err}
+		found:=false
+		for _,row:=range versions{
+			if row.Tag==target {r=row;found=true;break}
+		}
+		if !found{return Downloaded{},errors.New("指定版本不在最近十个可安装的正式发行版中")}
+		asset,checksum=findAsset(r,s.filename(),s)
 	}
-	if !newer(r.Tag, s.Version) {
-		return Downloaded{}, errors.New("当前已是最新版本，拒绝重复安装或降级")
+	if e!=nil{return Downloaded{},e}
+	if !newer(r.Tag,s.Version){
+		if r.Tag=="v"+s.Version{return Downloaded{},errors.New("已经是当前版本，无须重复安装")}
+		if !allowDowngrade{return Downloaded{},errors.New("降级需要用户明确确认")}
 	}
 	if asset.Name == "" || asset.Size < 1 || asset.Size > maxPackage || (checksum.Name == "" && !validHash(asset.SHA)) {
 		return Downloaded{}, errors.New("Release 缺少当前平台的完整 ZIP 和 SHA-256")
 	}
 	hash := strings.ToLower(asset.SHA)
+	if report!=nil{report(DownloadProgress{Phase:"verifying",Version:r.Tag,TotalBytes:asset.Size,Message:"正在取得校验信息"})}
 	if checksum.Name != "" {
 		b, _, err := s.downloadCandidate(ctx, checksum.URL, source, 64<<10)
 		if err != nil {
@@ -344,6 +470,7 @@ func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, 
 	candidates := sourceCandidates(asset.URL, source, s.APIBase != "")
 	var downloadErr error
 	for _, u := range candidates {
+		if report!=nil{report(DownloadProgress{Phase:"downloading",Version:r.Tag,Source:u,TotalBytes:asset.Size,Message:"正在下载发行包"})}
 		// A dead community node must not block all later fallback candidates.
 		limit := 30 * time.Second
 		if source == "auto" && s.APIBase == "" && u == asset.URL { limit = 16 * time.Second }
@@ -373,7 +500,8 @@ func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, 
          return Downloaded{}, err
         }
 		digest := sha256.New()
-		n, err := io.Copy(io.MultiWriter(tmp, digest), io.LimitReader(resp.Body, maxPackage+1))
+		pw:=&progressWriter{callback:report,snapshot:DownloadProgress{Phase:"downloading",Version:r.Tag,Source:u,TotalBytes:asset.Size,Message:"正在下载发行包"},started:time.Now()}
+		n, err := io.Copy(io.MultiWriter(tmp, digest,pw), io.LimitReader(resp.Body, maxPackage+1))
 		resp.Body.Close()
         cancel()
 		closeErr := tmp.Close()
@@ -386,6 +514,7 @@ func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, 
 		if err == nil && n > maxPackage {
 			err = errors.New("下载体积超出上限")
 		}
+		if report!=nil{report(DownloadProgress{Phase:"verifying",Version:r.Tag,DownloadedBytes:n,TotalBytes:asset.Size,Percent:100,Message:"下载完成，正在执行 SHA256 完整性验证"})}
 		if err == nil && !strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), hash) {
 			err = errors.New("SHA256 不匹配")
 		}
@@ -399,6 +528,7 @@ func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, 
 			os.Remove(tmp.Name())
 			return Downloaded{}, err
 		}
+		if report!=nil{report(DownloadProgress{Phase:"ready",Version:r.Tag,DownloadedBytes:n,TotalBytes:asset.Size,Percent:100,Message:"下载及 SHA256 验证通过，可安装"})}
 		return Downloaded{File: target, SHA256: hash, Version: r.Tag, Message: "更新包已验证并下载；可以点击安装并重启"}, nil
 	}
 	return Downloaded{}, fmt.Errorf("更新包所有线路均失败：%w", downloadErr)
