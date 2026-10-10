@@ -1083,6 +1083,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	a.qrRoutes(mux)
 	a.wsRoutes(mux)
 	a.legacyRoutes(mux)
+	a.permissionRoutes(mux)
 	a.storageRoutes(mux)
 	mux.HandleFunc("GET /control", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusTemporaryRedirect) })
 	mux.HandleFunc("GET /index", func(w http.ResponseWriter, r *http.Request) {
