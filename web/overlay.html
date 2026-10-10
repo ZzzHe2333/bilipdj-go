@@ -79,11 +79,12 @@ function scrollStep(ts){
  if(!style.value.auto_scroll||!scrollEl.value||document.hidden)return;
  const el=scrollEl.value,max=Math.max(0,el.scrollHeight-el.clientHeight);
  if(max<=1){lastFrame=ts;scrollFrame=requestAnimationFrame(scrollStep);return}
- if(ts>=pauseUntil){
+ if(pauseUntil>0&&ts>=pauseUntil){
+  el.scrollTop=0;pauseUntil=0;lastFrame=ts;
+ }else if(pauseUntil===0){
   const delta=lastFrame===0?0:Math.min(0.1,(ts-lastFrame)/1000);
   el.scrollTop=Math.min(max,el.scrollTop+numeric('queue_scroll_speed',30,1,300)*delta);
   if(el.scrollTop>=max-1)pauseUntil=ts+1400;
-  if(pauseUntil&&ts>=pauseUntil){el.scrollTop=0;pauseUntil=0}
  }
  lastFrame=ts;
  scrollFrame=requestAnimationFrame(scrollStep);
