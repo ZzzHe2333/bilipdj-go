@@ -21,6 +21,7 @@ type Event struct {
 	Kind        string    `json:"kind,omitempty"`
 	Gift        *Gift     `json:"gift,omitempty"`
 	Platform    string    `json:"platform"`
+	InstanceID  string    `json:"instance_id,omitempty"`
 	UserID      string    `json:"user_id"`
 	Username    string    `json:"username"`
 	Content     string    `json:"content"`
@@ -32,6 +33,7 @@ type Event struct {
 
 type Status struct {
 	Platform  string    `json:"platform"`
+	InstanceID string    `json:"instance_id,omitempty"`
 	Connected bool      `json:"connected"`
 	Message   string    `json:"message"`
 	Since     time.Time `json:"since"`
