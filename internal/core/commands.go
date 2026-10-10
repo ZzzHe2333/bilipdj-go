@@ -221,7 +221,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 			words := strings.SplitN(input, " ", 3)
 			if len(words) == 3 {
 				n, err := strconv.Atoi(words[1])
-				if err == nil && n > 0 && n <= 30 && n <= len(a.queue)+1 {
+				if err == nil && n > 0 && n <= 30 && (words[0] != "无影插" || n <= 20) && n <= len(a.queue)+1 {
 					name := strings.TrimSpace(words[2])
 					if name != "" && len([]rune(name)) <= 200 && len(a.queue) < 10000 {
 						if words[0] == "插队" {
