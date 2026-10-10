@@ -20,7 +20,7 @@ func linuxStartupPath() (string, error) {
 }
 func desktopExec(path string) (string, error) {
     if strings.ContainsAny(path, "\r\n") { return "", errors.New("程序路径含换行符") }
-    escape := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "$", "\\$", "`", "\\`")
+    escape := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "$", "\\$", "`", "\\`", "%", "%%")
     return "\"" + escape.Replace(path) + "\"", nil
 }
 func linuxEntry() (string, string, error) {
