@@ -350,6 +350,7 @@ func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, 
 		requestCtx, cancel := context.WithTimeout(ctx, limit)
 		req, err := http.NewRequestWithContext(requestCtx, "GET", u, nil)
 		if err != nil {
+			cancel()
 			return Downloaded{}, err
 		}
 		req.Header.Set("User-Agent", "bilipdj-go-updater/1.0")
