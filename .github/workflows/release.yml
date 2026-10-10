@@ -1,8 +1,5 @@
 name: Build and Release
 on:
-  # One-off user-approved release for Issue #29, scoped to this branch and exact commit message.
-  push:
-    branches: [release/v0.10.4]
   workflow_dispatch:
     inputs:
       publish:
@@ -19,7 +16,6 @@ permissions:
   contents: write
 jobs:
   test:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/release/v0.10.4' && github.event.head_commit.message == 'publish-v0.10.4-issue29')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -35,7 +31,7 @@ jobs:
           test "$(sed -n 's/^var version = \"\([^\"]*\)\"/\1/p' main.go)" = "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Reject publishing an existing version
-        if: (github.event_name == 'workflow_dispatch' && inputs.publish == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release/v0.10.4' && github.event.head_commit.message == 'publish-v0.10.4-issue29')
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
         shell: bash
         run: |
           if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
@@ -113,7 +109,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   release:
-    if: (github.event_name == 'workflow_dispatch' && inputs.publish == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release/v0.10.4' && github.event.head_commit.message == 'publish-v0.10.4-issue29')
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true
     needs: [test, build]
     runs-on: ubuntu-latest
     steps:
@@ -142,7 +138,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.test.outputs.version }}
-          target_commitish: 9b2611e390a4870a0fb75b8a752ad9fd4aa046a7
           name: BiliPDJ Go v${{ needs.test.outputs.version }}
           generate_release_notes: true
           files: |
