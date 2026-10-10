@@ -75,6 +75,10 @@ func TestPermissionScopeAndAdminCapabilityBoundary(t *testing.T){
  if len(app.queue)!=1{t.Fatal("baseline queue")}
  send("bilibili","Bob","2","插队 1 Sneaky")
  if len(app.queue)!=1{t.Fatal("admin bypassed disabled insert permission")}
+ app.config.Switches.GuardInsert=true
+ app.OnDanmu(live.Event{Platform:"bilibili",Username:"Bob",UserID:"2",Content:"插队",GuardLevel:3,Time:time.Now()})
+ if len(app.queue)!=1{t.Fatal("restricted admin bypassed no-insert via guard privilege")}
+ app.config.Switches.GuardInsert=false
  send("bilibili","Bob","2","添加管理员 Another")
  if _,ok:=app.config.effectiveEntry(live.Event{Platform:"bilibili",Username:"Another"});ok{t.Fatal("regular admin appointed administrator")}
  send("douyin","Bob","3","删除 1")
