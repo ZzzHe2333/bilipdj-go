@@ -84,7 +84,7 @@ docker compose ps
 | 🙋 排队与权限 | 关键词自动排队、人工追加/移动/完成/删除、黑名单、主播/管理员分级、房管权限与舰长插队（按开关配置） |
 | 🗂️ 存档 | 10 个排队槽位，同一槽位内 B站和抖音共用队列；Go 数据与原 Python `bilipdj` 目录隔离 |
 | 📋 运行日志 | 首页显示平台连接、排队与系统事件；支持筛选、搜索、复制和导出 TXT |
-| 🪟 Web 与 Windows | Vue 3 离线控制台、独立排队管理页、Windows 无黑框启动与品牌托盘图标、首次使用向导 |
+| 🪟 Web 与 Windows | Vue 3 离线控制台、独立排队管理页、Windows 无黑框启动与品牌托盘图标、首次使用向导、可选登录自启（默认关闭） |
 | 🎬 OBS 展示 | 旧版 `/index` 地址兼容；默认**只显示用户名**，可选序号、显示人数、自动滚动速度、字号与背景样式 |
 | 📈 性能监测 | 默认每 2 秒采样，可选 0（关闭）或 1–1200 秒；显示受平台支持的 CPU、内存、进程 I/O、磁盘与网络口径；**不虚报 GPU/NPU 数据** |
 | 🎁 B站礼物资格 | 可配置礼物白名单、资格去重及插队消费；默认关闭，依赖真实有效的直播事件 |
@@ -92,6 +92,12 @@ docker compose ps
 | 🤖 AI / MCP | `/mcp` 和 `--mcp-stdio`；默认只读，写操作需要独立授权 Token |
 
 **尚未提供：** Python 版 Tk UI、Python/JS 插件市场、WebDAV 存档、动态礼物价格目录与完整的原版双向 WebSocket 控制协议。`/ws` 仅提供兼容性**只读事件推送**，不能用它执行管理指令。
+
+## ⚙️ 开机自启（可选，默认关闭）
+
+在 Vue Web 控制台的 **「平台与规则 → 开机自启」** 中可启用当前用户登录系统后自动启动。Windows 还可在任务栏右下角 **BiliPDJ-Go 托盘右键菜单** 勾选或取消「开机自启（登录后启动）」，两处读取同一个系统启动项，状态自动同步。
+
+Windows 使用当前用户的注册表 Run 项；Linux 桌面使用 XDG Autostart；macOS 使用用户 LaunchAgent。**默认不会开启**，不会申请管理员权限；Docker/容器中禁用此功能，继续使用 Compose `restart: unless-stopped`。完整机制、限制和路径详见 [开机自启说明](./docs/AUTOSTART.md)。
 
 ## 🏗️ 项目结构
 
@@ -208,6 +214,7 @@ go vet ./...
 | [更新器说明](./docs/UPDATER.md) | 公益加速节点、进度、历史版本、回滚 |
 | [性能监测](./docs/PERFORMANCE.md) | CPU、内存、I/O、网络监测口径与采样设置 |
 | [MCP 接入指南](./docs/MCP.md) | HTTP/stdio MCP、安全授权与使用示例 |
+| [开机自启](./docs/AUTOSTART.md) | Windows 托盘/Web 同步，Linux/macOS 登录启动项，Docker 限制 |
 | [README 技术说明归档](./docs/README_TECHNICAL_ARCHIVE.md) | 重排前完整的迁移记录、兼容 API、鉴权排障和版本历史 |
 | [第三方授权](./NOTICE.md) | 内嵌 Vue 3 等第三方版权声明 |
 
