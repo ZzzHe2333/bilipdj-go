@@ -161,3 +161,23 @@ func TestTargetedListenerRefreshDoesNotReconnectOtherRooms(t *testing.T){
  if len(source.connections)!=3{t.Fatalf("expected three total runs, got %v",source.connections)}
  if len(source.canceled)!=1||source.canceled[0]!="456"{t.Fatalf("unrelated room was disconnected: %v",source.canceled)}
 }
+
+func TestActivePlatformsReturnUniqueNamesAndListenerInstances(t *testing.T){
+ a:=New(t.TempDir(),"0.10.4","org/repo")
+ a.config.Bilibili=PlatformConfig{Enabled:true,Room:"123",Cookie:"SESSDATA=abc"}
+ a.config.Listeners=[]ListenerConfig{
+  extraRoom("bilibili-extra-one","bilibili","456","SESSDATA=def",true),
+  extraRoom("douyin-extra-one","douyin","789","",true),
+ }
+ req:=httptest.NewRequest(http.MethodGet,"http://127.0.0.1:9816/api/platforms/active",nil)
+ res:=httptest.NewRecorder()
+ a.Routes(http.NotFoundHandler()).ServeHTTP(res,req)
+ if res.Code!=200{t.Fatalf("status: %d",res.Code)}
+ var payload struct {
+  Active []string `json:"active"`
+  Instances []string `json:"instances"`
+ }
+ if err:=json.Unmarshal(res.Body.Bytes(),&payload);err!=nil{t.Fatal(err)}
+ if len(payload.Active)!=2||payload.Active[0]!="bilibili"||payload.Active[1]!="douyin"{t.Fatalf("platforms not deduplicated: %v",payload.Active)}
+ if len(payload.Instances)!=3{t.Fatalf("missing room IDs: %v",payload.Instances)}
+}
