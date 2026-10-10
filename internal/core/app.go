@@ -141,6 +141,8 @@ type App struct {
 	repo                string
 	updater             *update.Service
 	updateMu            sync.Mutex
+	progressMu          sync.RWMutex
+	updateProgress      update.DownloadProgress
 	performance         *perf.Monitor
 	preparedUpdate      update.Downloaded
 	installAction       func(update.Downloaded) error
@@ -839,6 +841,23 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		send(w, 200, a.messages)
 	})
 	mux.HandleFunc("GET /api/events", a.events)
+ 	mux.HandleFunc("GET /api/update/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {send(w,403,map[string]string{"error":"forbidden"});return}
+		ctx,cancel:=context.WithTimeout(r.Context(),18*time.Second)
+		defer cancel()
+		rows,e:=a.updater.Versions(ctx)
+		if e!=nil {send(w,502,map[string]string{"error":e.Error()});return}
+		w.Header().Set("Cache-Control","no-store")
+		send(w,200,rows)
+	})
+	mux.HandleFunc("GET /api/update/progress", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {send(w,403,map[string]string{"error":"forbidden"});return}
+		a.progressMu.RLock()
+		progress:=a.updateProgress
+		a.progressMu.RUnlock()
+		w.Header().Set("Cache-Control","no-store")
+		send(w,200,progress)
+	})
 	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
@@ -864,22 +883,32 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		}
 		var body struct {
 			Source string `json:"source"`
+			Version string `json:"version"`
+			AllowDowngrade bool `json:"allow_downgrade"`
 		}
 		if e := decode(r, &body); e != nil {
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
-		a.updateMu.Lock()
+		if !a.updateMu.TryLock(){send(w,409,map[string]string{"error":"已经有下载任务正在执行"});return}
 		defer a.updateMu.Unlock()
-		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
-		defer cancel()
-		result, e := a.updater.Download(ctx, body.Source)
-		if e != nil {
-			send(w, 502, map[string]string{"error": e.Error()})
-			return
+		progressFn:=func(p update.DownloadProgress){
+			a.progressMu.Lock()
+			a.updateProgress=p
+			a.progressMu.Unlock()
 		}
-		a.preparedUpdate = result
-		send(w, 200, result)
+		progressFn(update.DownloadProgress{Phase:"checking",Version:body.Version,Message:"正在检查 Release 和校验文件"})
+		// Any newly initiated task invalidates the old install candidate.
+		a.preparedUpdate=update.Downloaded{}
+		ctx,cancel:=context.WithTimeout(r.Context(),4*time.Minute)
+		defer cancel()
+		result,e:=a.updater.DownloadVersion(ctx,body.Version,body.AllowDowngrade,progressFn,body.Source)
+		if e!=nil{
+			progressFn(update.DownloadProgress{Phase:"error",Version:body.Version,Message:e.Error()})
+			send(w,502,map[string]string{"error":e.Error()});return
+		}
+		a.preparedUpdate=result
+		send(w,200,result)
 	})
 	mux.HandleFunc("POST /api/update/install", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
