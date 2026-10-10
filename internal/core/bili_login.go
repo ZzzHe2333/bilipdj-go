@@ -235,7 +235,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
         target:="bilibili"
         if r.Method==http.MethodPost {
           var body struct{ InstanceID string `json:"instance_id"` }
-          if e:=decode(r,&body);e!=nil {send(w,400,map[string]string{"error":e.Error()});return}
+          if e:=decode(r,&body);e!=nil&&!errors.Is(e,io.EOF) {send(w,400,map[string]string{"error":e.Error()});return}
           if body.InstanceID!=""{target=body.InstanceID}
         }
         a.mu.RLock()
@@ -268,7 +268,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 			return
 		}
         var request struct { InstanceID string `json:"instance_id"` }
-        if err:=decode(r,&request);err!=nil{send(w,400,map[string]string{"error":err.Error()});return}
+        if err:=decode(r,&request);err!=nil&&!errors.Is(err,io.EOF){send(w,400,map[string]string{"error":err.Error()});return}
         requested:=request.InstanceID
         if requested==""{requested="bilibili"}
 		a.qrMu.Lock()
@@ -350,7 +350,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bili/logout", func(w http.ResponseWriter,r *http.Request){
  if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
  var req struct{InstanceID string `json:"instance_id"`}
- if err:=decode(r,&req);err!=nil{send(w,400,map[string]string{"error":err.Error()});return}
+ if err:=decode(r,&req);err!=nil&&!errors.Is(err,io.EOF){send(w,400,map[string]string{"error":err.Error()});return}
  id:=req.InstanceID
  if id==""{id="bilibili"}
  a.qrMu.Lock()
