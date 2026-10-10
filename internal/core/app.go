@@ -846,6 +846,8 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			NameEdit *string `json:"new_name,omitempty"`
 			SourcePlatform *string `json:"source_platform,omitempty"`
 			Index  int    `json:"index"`
+			Keys []string `json:"keys,omitempty"`
+			Before []string `json:"before,omitempty"`
 		}
 		if e := decode(r, &req); e != nil {
 			send(w, 400, map[string]string{"error": e.Error()})
@@ -854,6 +856,27 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		switch req.Action {
+        case "reorder":
+            if len(req.Keys)!=len(a.queue)||len(req.Before)!=len(a.queue){
+                send(w,409,map[string]string{"error":"队列人数已改变，请刷新后重新排序"});return
+            }
+            existing:=make(map[string]QueueItem,len(a.queue))
+            for i,item:=range a.queue {
+                if item.Key==""||req.Before[i]!=item.Key {
+                    send(w,409,map[string]string{"error":"排序期间队列已被修改，请重新排序"});return
+                }
+                existing[item.Key]=item
+            }
+            sorted:=make([]QueueItem,0,len(a.queue))
+            seen:=make(map[string]bool,len(a.queue))
+            for _,key:=range req.Keys {
+                item,found:=existing[key]
+                if !found||seen[key]{
+                    send(w,400,map[string]string{"error":"排序包含无效或重复的成员"});return
+                }
+                seen[key]=true;sorted=append(sorted,item)
+            }
+            a.queue=sorted
 		case "clear":
 			a.queue = []QueueItem{}
 		case "remove":
