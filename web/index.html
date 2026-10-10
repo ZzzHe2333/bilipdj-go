@@ -96,8 +96,12 @@
   <div class="channel-add"><button class="btn primary" type="button" @click="showPlatformPicker=!showPlatformPicker" :aria-expanded="showPlatformPicker">＋ 添加平台</button>
    <div v-if="showPlatformPicker" class="channel-picker"><button v-for="p in addablePlatforms" :key="p.id" @click="addPlatform(p.id)" type="button">{{p.name}} <small>{{p.supported?'弹幕监听可用':'占位预留'}}</small></button><p v-if="!addablePlatforms.length" class="tip">所有平台已添加</p></div>
   </div></section>
- <div v-if="!configuredPlatforms.length" class="panel channel-empty">暂无平台配置，点击上方「＋ 添加平台」选择。</div>
- <div class="settings-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id">
+ <nav class="channel-tabs" aria-label="切换直播间配置" role="tablist">
+ <button v-for="p in configuredPlatforms" :key="p.id" type="button" class="channel-tab" role="tab" :aria-selected="activeChannelTab===p.id" :class="{selected:activeChannelTab===p.id}" @click="activeChannelTab=p.id">{{p.name}}</button>
+ <button v-for="room in (config.listeners||[])" :key="room.id" type="button" class="channel-tab" role="tab" :aria-selected="activeChannelTab===room.id" :class="{selected:activeChannelTab===room.id}" @click="activeChannelTab=room.id">{{room.platform==='bilibili'?'B站':'抖音'}} · {{room.room||'新直播间'}}</button>
+</nav>
+<div v-if="!configuredPlatforms.length" class="panel channel-empty">暂无平台配置，点击上方「＋ 添加平台」选择。</div>
+ <div class="settings-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id" v-show="activeChannelTab===p.id">
   <div class="setting-head"><div><h2>{{p.name}}</h2><small :class="p.supported?'support-ok':'support-pending'">{{p.supported?'可用 · 独立监听、统一排队':'占位 · 暂未支持监听'}}</small></div>
     <div class="channel-head-actions"><label v-if="p.supported" class="switch"><input type="checkbox" v-model="config[p.id].enabled" :aria-label="'启用'+p.name"><span class="switch-bg"></span></label><button type="button" class="btn small" @click="removePlatform(p.id)">移除</button></div></div>
   <label>直播间号或直播链接<input v-model.trim="config[p.id].room" :placeholder="p.placeholder" autocomplete="off" @blur="p.id==='douyin'&&normalizeDouyinField()"></label>
@@ -123,7 +127,7 @@
  <p class="tip">新增实例先填写直播间并保持关闭，点击保存，然后逐个扫码绑定对应 B站账号；登录成功后开启监听并保存。每个房间都有自己的连接状态。</p>
 </div>
 <div v-if="(config.listeners||[]).length" class="settings-grid multi-room-grid">
- <article v-for="listener in config.listeners" :key="listener.id" class="panel settings-card">
+ <article v-for="listener in config.listeners" :key="listener.id" v-show="activeChannelTab===listener.id" class="panel settings-card">
   <div class="setting-head">
    <div><h2>{{listener.platform==='bilibili'?'Bilibili 直播间':'抖音直播间'}}</h2>
     <small class="support-ok">独立监听 · 共用队列 · {{listener.id}}</small>
