@@ -114,3 +114,20 @@
  .member-shortcuts .btn{min-height:43px;font-size:12px;padding:8px 2px;white-space:normal}
 }
 @media(max-width:360px){.member-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Compact, touch-friendly modal editor for mobile and desktop. */
+.queue-dialog-backdrop{position:fixed;inset:0;z-index:2000;background:#020713c9;display:flex;align-items:center;justify-content:center;padding:clamp(12px,3vw,28px);overflow-y:auto}
+.queue-edit-dialog{background:var(--panel);color:var(--text);border:1px solid #455779;border-radius:16px;width:min(100%,430px);max-height:calc(100dvh - 24px);overflow:auto;box-shadow:0 25px 85px #000b;padding:clamp(18px,4vw,26px)}
+.queue-edit-header{display:flex;justify-content:space-between;align-items:start;gap:16px}
+.queue-edit-header h2{font-size:20px;margin:0}
+.queue-edit-header .eyebrow{margin-bottom:7px}
+.queue-edit-dialog .tip{margin:10px 0;color:var(--dim);font-size:12px}
+.dialog-close{border:0;background:transparent;color:var(--dim);font-size:28px;min-width:38px;min-height:38px;line-height:1;cursor:pointer}
+.queue-edit-form{display:grid;gap:13px;margin-top:12px}
+.queue-edit-form>label{display:block;font-size:13px;color:var(--dim);font-weight:600}
+.queue-edit-form input,.queue-edit-form textarea,.queue-edit-form select{display:block;width:100%;max-width:100%;min-width:0;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;margin-top:7px;padding:11px 12px;font-size:16px;min-height:44px}
+.queue-edit-form textarea{min-height:95px;resize:vertical}
+.queue-edit-form input[readonly]{opacity:.7}
+.queue-dialog-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+.queue-dialog-actions .btn{min-height:45px}
+@media(max-width:430px){.queue-dialog-backdrop{align-items:center;padding:10px}.queue-edit-dialog{width:100%;padding:18px}.queue-dialog-actions .btn{flex:1}}
