@@ -5,6 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
  <meta name="theme-color" content="#101a2a">
  <title>BiliPDJ Go · 独立排队管理</title>
+ <link rel="icon" type="image/svg+xml" href="/bilipdj-go-tray.svg">
  <link rel="stylesheet" href="/style.css">
  <link rel="stylesheet" href="/queue-standalone.css">
 </head>
@@ -12,7 +13,7 @@
 <div id="app" v-cloak>
  <div class="queue-shell">
   <header class="queue-page-header">
-   <div class="queue-page-brand"><div class="logo">B</div><div><p class="eyebrow">BILIPDJ GO · QUEUE</p><h1>独立排队管理</h1><p class="tip">与主控制台、直播弹幕及 OBS 实时共用队列</p></div></div>
+   <div class="queue-page-brand"><img class="logo logo-image" src="/bilipdj-go.svg" width="35" height="35" alt="BiliPDJ-Go 排队管理图标"><div><p class="eyebrow">BILIPDJ GO · QUEUE</p><h1>独立排队管理</h1><p class="tip">与主控制台、直播弹幕及 OBS 实时共用队列</p></div></div>
    <nav class="header-actions" aria-label="页面操作">
     <span class="connection" :class="{online:streamReady}">{{streamReady?'实时同步':'轮询同步'}}</span>
     <a class="btn small" href="/" rel="noopener">返回主控制台</a>
