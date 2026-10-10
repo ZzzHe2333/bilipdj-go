@@ -42,6 +42,7 @@ type Config struct {
 	Admins              []string       `json:"admins"`
 	SuperAdmins         []string       `json:"super_admins"`
 	Guards              []string       `json:"guards"`
+	Permissions         []PermissionEntry `json:"permissions,omitempty"`
 	DailyQueueLimit     int            `json:"daily_queue_limit"`
 	DailyQueueResetTime string         `json:"daily_queue_reset_time"`
 	Blacklist           []string       `json:"blacklist"`
@@ -372,11 +373,7 @@ func (a *App) OnDanmu(e live.Event) {
 	}
 	a.publishLocked(Event{Type: "danmu", Data: e})
 	a.appendLogLocked("INFO", e.Platform, e.Username+"："+e.Content)
-	for _, s := range a.config.Blacklist {
-		if strings.EqualFold(strings.TrimSpace(s), e.Username) || s == e.UserID {
-			return
-		}
-	}
+	if a.isBlacklisted(e){return}
 	if a.processDanmuCommandLocked(e) {
 		if err := a.saveLocked(); err != nil {
 			log.Printf("queue persist: %v", err)
@@ -514,6 +511,11 @@ func cleanConfig(c Config) (Config, error) {
 	if len([]rune(c.Command)) > 16 {
 		return c, errors.New("口令最多 16 个字符")
 	}
+	if c.Permissions!=nil {
+        var err error
+        c.Permissions,err=cleanPermissions(c.Permissions)
+        if err!=nil{return c,err}
+    }
 	if len(c.Bilibili.Cookie) > 8192 || len(c.Douyin.Cookie) > 8192 {
 		return c, errors.New("Cookie 超过长度限制")
 	}
