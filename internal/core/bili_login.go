@@ -336,7 +336,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
         if e!=nil{send(w,500,map[string]string{"error":"本地保存登录状态失败"});return}
         a.qrSession=biliQRSession{}
         item,_:=cfg.listener(target)
-        if item.Enabled {a.apply(cfg)}
+        if item.Enabled {a.refreshListener(target)}
 		send(w, 200, map[string]any{"status": "success", "uid": nav.Data.Mid, "username": nav.Data.Uname, "message": "B站扫码登录成功，已安全保存会话"})
 	})
 	mux.HandleFunc("POST /api/bili/logout", func(w http.ResponseWriter,r *http.Request){
@@ -368,7 +368,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
  if err!=nil{a.config=before}
  a.mu.Unlock()
  if err!=nil{send(w,500,map[string]string{"error":"保存失败"});return}
- a.apply(updated)
+ a.refreshListener(id)
  send(w,200,map[string]string{"status":"ok"})
 })
 
@@ -377,8 +377,5 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 // Legacy call-site compatibility; reconfigure connections from the complete
 // multi-room state, rather than replacing a platform-wide singleton worker.
 func (a *App) restartBilibili(_ PlatformConfig) {
- a.mu.RLock()
- cfg:=a.config
- a.mu.RUnlock()
- a.apply(cfg)
+ a.refreshListener("bilibili")
 }
