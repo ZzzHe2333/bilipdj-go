@@ -301,7 +301,7 @@ createApp({setup(){
  }
  function stopQR(){if(qrTimer!==null){clearInterval(qrTimer);qrTimer=null}}
  async function pollQR(){if(qrPolling || !qrImage.value)return;qrPolling=true;
-  try{const result=await api('/api/bili/qr/poll',{method:'POST',body:'{}'});
+  try{const result=await api('/api/bili/qr/poll',{method:'POST',body:JSON.stringify({instance_id:qrInstanceId.value})});
    if(result.status==='success'){stopQR();qrImage.value='';qrLink.value='';qrState.value='扫码登录成功：'+(result.username||result.uid);message(qrState.value,'success');const d=await api('/api/config');cookieConfigured.value=d.cookie_configured;listenerCookies.value=d.listener_cookies||{};}
    else{qrState.value=result.message||'等待手机扫码';}
   }catch(e){stopQR();qrImage.value='';qrState.value=e.message;message('B站扫码：'+e.message,'error')}
