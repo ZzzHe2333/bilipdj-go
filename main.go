@@ -23,7 +23,7 @@ import (
 
 //go:embed web/*
 var ui embed.FS
-var version = "0.10.3"
+var version = "0.10.4"
 
 func main() {
 	// MCP stdio connects to the existing server and never opens a second
