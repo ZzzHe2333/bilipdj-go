@@ -142,7 +142,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 			switch {
 			case strings.HasPrefix(input, "添加管理员 "):
 				target := strings.TrimSpace(strings.TrimPrefix(input, "添加管理员 "))
-				if target!=""&&len([]rune(target))<=60{return a.upsertRoleLocked(e.Platform,target,"admin")}
+				if target!=""&&len([]rune(target))<=60&&!a.isBlacklisted(live.Event{Platform:e.Platform,Username:target}){return a.upsertRoleLocked(e.Platform,target,"admin")}
 				return false
 			case strings.HasPrefix(input, "取消管理员 "):
 				target := strings.TrimSpace(strings.TrimPrefix(input, "取消管理员 "))
@@ -153,7 +153,11 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 		switch {
 		case strings.HasPrefix(input, "拉黑 "):
 			target := strings.TrimSpace(strings.TrimPrefix(input, "拉黑 "))
-			if a.commandAllowed(e,"moderate")&&a.upsertRoleLocked(e.Platform,target,"blacklist"){return true}
+			if a.commandAllowed(e,"moderate"){
+                victim,exists:=a.config.effectiveEntry(live.Event{Platform:e.Platform,Username:target})
+                if exists&&victim.Role=="super_admin"&&!super{return false}
+                if a.upsertRoleLocked(e.Platform,target,"blacklist"){return true}
+            }
 			return false
 		case strings.HasPrefix(input, "取消拉黑 "):
 			target := strings.TrimSpace(strings.TrimPrefix(input, "取消拉黑 "))
