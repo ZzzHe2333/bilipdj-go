@@ -788,24 +788,25 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 				send(w, 400, map[string]string{"error": "真实直播成员只允许修改备注，不允许更改认证姓名或来源"})
 				return
 			}
+			// Validate all optional fields before mutating the queue entry.
+			newName, newSource := item.Username, item.SourcePlatform
 			if req.NameEdit != nil {
-				name := strings.TrimSpace(*req.NameEdit)
-				if name == "" || len([]rune(name)) > 60 {
+				newName = strings.TrimSpace(*req.NameEdit)
+				if newName == "" || len([]rune(newName)) > 60 {
 					send(w, 400, map[string]string{"error": "用户名必须为 1 到 60 个字符"})
 					return
 				}
-				item.Username = name
 			}
 			if req.SourcePlatform != nil {
-				source := strings.TrimSpace(*req.SourcePlatform)
-				switch source {
+				newSource = strings.TrimSpace(*req.SourcePlatform)
+				switch newSource {
 				case "", "bilibili", "douyin", "huya", "wechat_mp", "kuaishou", "douyu":
-					item.SourcePlatform = source
 				default:
 					send(w, 400, map[string]string{"error": "未知的手动来源平台"})
 					return
 				}
 			}
+			item.Username, item.SourcePlatform = newName, newSource
 			item.Note = strings.TrimSpace(req.Note)
 		default:
 			send(w, 400, map[string]string{"error": "unknown action"})
