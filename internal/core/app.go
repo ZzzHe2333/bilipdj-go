@@ -28,6 +28,11 @@ type PlatformConfig struct {
 type Config struct {
 	Bilibili            PlatformConfig `json:"bilibili"`
 	Douyin              PlatformConfig `json:"douyin"`
+	Huya                PlatformConfig `json:"huya"`
+	WechatMP            PlatformConfig `json:"wechat_mp"`
+	Kuaishou            PlatformConfig `json:"kuaishou"`
+	Douyu               PlatformConfig `json:"douyu"`
+	VisiblePlatforms    []string       `json:"visible_platforms,omitempty"`
 	AutoQueue           bool           `json:"auto_queue"`
 	Command             string         `json:"command"`
 	MaxQueue            int            `json:"max_queue"`
@@ -420,6 +425,22 @@ func decode(r *http.Request, dest any) error {
 func cleanConfig(c Config) (Config, error) {
 	c.Bilibili.Room = strings.TrimSpace(c.Bilibili.Room)
 	c.Douyin.Room = strings.TrimSpace(c.Douyin.Room)
+	c.Huya.Room = strings.TrimSpace(c.Huya.Room)
+	c.WechatMP.Room = strings.TrimSpace(c.WechatMP.Room)
+	c.Kuaishou.Room = strings.TrimSpace(c.Kuaishou.Room)
+	c.Douyu.Room = strings.TrimSpace(c.Douyu.Room)
+	// Placeholder channels may store future room settings, but must never claim to be monitored.
+	if c.Huya.Enabled || c.WechatMP.Enabled || c.Kuaishou.Enabled || c.Douyu.Enabled {
+		return c, errors.New("虎牙、微信公众号、快手及斗鱼暂未接入弹幕监听，请等待后续版本")
+	}
+	allowed := map[string]bool{"bilibili": true, "douyin": true, "huya": true, "wechat_mp": true, "kuaishou": true, "douyu": true}
+	seen := map[string]bool{}
+	visible := make([]string, 0, len(c.VisiblePlatforms))
+	for _, id := range c.VisiblePlatforms {
+		if !allowed[id] { return c, errors.New("不支持的平台配置项: " + id) }
+		if !seen[id] { visible = append(visible, id); seen[id] = true }
+	}
+	c.VisiblePlatforms = visible
 	c.Command = strings.TrimSpace(c.Command)
 	if c.Command == "" {
 		c.Command = "排队"
@@ -620,6 +641,10 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		c := a.config
 		c.Bilibili.Cookie = ""
 		c.Douyin.Cookie = ""
+		c.Huya.Cookie = ""
+		c.WechatMP.Cookie = ""
+		c.Kuaishou.Cookie = ""
+		c.Douyu.Cookie = ""
 		send(w, 200, map[string]any{"config": c, "cookie_configured": map[string]bool{"bilibili": a.config.Bilibili.Cookie != "", "douyin": a.config.Douyin.Cookie != ""}})
 	})
 	mux.HandleFunc("POST /api/config", func(w http.ResponseWriter, r *http.Request) {
@@ -639,6 +664,10 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		if cfg.Douyin.Cookie == "" {
 			cfg.Douyin.Cookie = a.config.Douyin.Cookie
 		}
+		if cfg.Huya.Cookie == "" { cfg.Huya.Cookie = a.config.Huya.Cookie }
+		if cfg.WechatMP.Cookie == "" { cfg.WechatMP.Cookie = a.config.WechatMP.Cookie }
+		if cfg.Kuaishou.Cookie == "" { cfg.Kuaishou.Cookie = a.config.Kuaishou.Cookie }
+		if cfg.Douyu.Cookie == "" { cfg.Douyu.Cookie = a.config.Douyu.Cookie }
 		a.mu.Unlock()
 		cfg, e := cleanConfig(cfg)
 		if e != nil {

@@ -30,7 +30,40 @@ const douyinUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 var (
 	douyinRoom   = regexp.MustCompile(`(?:\\?"(?:roomId|room_id|web_rid)\\?"\s*:\s*\\?")(\d+)`)
 	douyinUnique = regexp.MustCompile(`(?:\\?"(?:user_unique_id|userUniqueId)\\?"\s*:\s*\\?")(\d+)`)
-	douyinPath   = regexp.MustCompile(`^[0-9A-Za-z_-]{1,100}$`)
+	douyinPath   = regexp.MustCompile(`^[0-9A-Za-z_-]{1,100}package live
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// Douyin uses the same public webcast/im/fetch protobuf endpoint as the Python edition.
+// The narrow wire decoder intentionally avoids pulling in the entire generated schema.
+type Douyin struct{ Client *http.Client }
+
+func (d Douyin) client() *http.Client {
+	if d.Client != nil {
+		return d.Client
+	}
+	return &http.Client{Timeout: 15 * time.Second}
+}
+
+const douyinUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+
+var (
+	douyinRoom   = regexp.MustCompile(`(?:\\?"(?:roomId|room_id|web_rid)\\?"\s*:\s*\\?")(\d+)`)
+	douyinUnique = regexp.MustCompile(`(?:\\?"(?:user_unique_id|userUniqueId)\\?"\s*:\s*\\?")(\d+)`)
+)
+	douyinSharedLink = regexp.MustCompile(`https?://[^\s"<>，。]+`)
 )
 
 type douyinInfo struct{ LiveID, RoomID, UniqueID, TTWID string }
@@ -38,11 +71,15 @@ type douyinInfo struct{ LiveID, RoomID, UniqueID, TTWID string }
 func douyinLiveID(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if strings.Contains(s, "://") {
-		u, e := url.Parse(s)
+		// The pasted share message may contain prose around a live.douyin.com URL.
+		// Never follow arbitrary URLs or use a user-provided host for HTTP requests.
+		match := douyinSharedLink.FindString(s)
+		if match == "" { return "", errors.New("请输入抖音直播间号或 live.douyin.com 链接") }
+		u, e := url.Parse(strings.TrimRight(match, "；;、)]）"))
 		if e != nil {
 			return "", e
 		}
-		if u.Host != "live.douyin.com" {
+		if u.Hostname() != "live.douyin.com" || u.Port() != "" || u.User != nil {
 			return "", errors.New("仅接受 live.douyin.com 直播链接")
 		}
 		s = strings.Trim(u.Path, "/")
