@@ -90,7 +90,7 @@ func readProcess()(c counters,err error){
   c.DiskReadBytes=io.ReadTransferCount
   c.DiskWriteBytes=io.WriteTransferCount
   c.DiskAvailable=true
-  // These totals include cached OS I/O; don't mislabel as physical disk writes.
+  c.DiskNote="Windows GetProcessIoCounters I/O 字节增量，可能包含缓存/设备 I/O，非纯物理磁盘吞吐"
  }
  return c,nil
 }
