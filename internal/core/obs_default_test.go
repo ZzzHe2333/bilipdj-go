@@ -17,3 +17,12 @@ func TestDefaultOBSStyleIsTrulyTransparent(t *testing.T) {
   t.Fatal("OBS font size should remain adjustable")
  }
 }
+
+func TestOBSDefaultShowsNamesOnlyAndHasScrollControls(t *testing.T) {
+ style:=defaultStyle()
+ for _,name:=range []string{"obs_show_header","show_sequence"} {
+  if style[name]!=false { t.Fatalf("%s should default to false, got %#v",name,style[name]) }
+ }
+ if style["queue_visible_count"]!=5 {t.Fatalf("unexpected visible count %#v",style["queue_visible_count"])}
+ if style["queue_scroll_speed"]!=30 {t.Fatalf("unexpected default scroll speed %#v",style["queue_scroll_speed"])}
+}
