@@ -12,6 +12,40 @@ createApp({setup(){
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
  const platforms=[{id:'bilibili',name:'Bilibili 直播',placeholder:'直播间号码，如 6'},{id:'douyin',name:'抖音直播',placeholder:'live.douyin.com/xxxx'}];
+ const platformCatalog=[
+  {id:'bilibili',name:'Bilibili 直播',supported:true,placeholder:'B站直播间号'},
+  {id:'douyin',name:'抖音直播',supported:true,placeholder:'直播间号或 live.douyin.com 链接'},
+  {id:'huya',name:'虎牙直播',supported:false,placeholder:'虎牙房间号',description:'虎牙弹幕监听暂未接入，只保存配置。'},
+  {id:'wechat_mp',name:'微信公众号',supported:false,placeholder:'公众号标识（预留）',description:'微信公众号目前只有配置占位。'},
+  {id:'kuaishou',name:'快手直播',supported:false,placeholder:'快手房间号（预留）',description:'快手直播弹幕监听暂未接入。'},
+  {id:'douyu',name:'斗鱼直播',supported:false,placeholder:'斗鱼房间号（预留）',description:'斗鱼直播弹幕监听暂未接入。'}
+ ];
+ const showPlatformPicker=ref(false),previousBiliEnabled=ref(false);
+ const configuredPlatforms=computed(()=>platformCatalog.filter(p=>(config.value.visible_platforms||[]).includes(p.id)));
+ const addablePlatforms=computed(()=>platformCatalog.filter(p=>!(config.value.visible_platforms||[]).includes(p.id)));
+ const monitorPlatforms=computed(()=>configuredPlatforms.value.filter(p=>p.supported&&config.value[p.id]?.enabled));
+ const enabledMonitorCount=computed(()=>monitorPlatforms.value.length);
+ function addPlatform(id){if(!platformCatalog.some(p=>p.id===id))return;
+  if(!config.value[id])config.value[id]={enabled:false,room:'',cookie:''};
+  if(!(config.value.visible_platforms||[]).includes(id))config.value.visible_platforms=[...(config.value.visible_platforms||[]),id];
+  showPlatformPicker.value=false;
+ }
+ function removePlatform(id){if(config.value[id])config.value[id].enabled=false;
+  config.value.visible_platforms=(config.value.visible_platforms||[]).filter(x=>x!==id);
+  if(id==='bilibili')stopQR();message('已移除平台；点击保存后停止监听','info');
+ }
+ function normalizeDouyinRoom(raw){const value=String(raw||'').trim();if(!value)return '';
+  if(/^[0-9A-Za-z_-]{1,100}$/.test(value))return value;
+  const hit=value.match(/https?:\/\/live\.douyin\.com\/[0-9A-Za-z_-]{1,100}(?:[/?#][^\s，。]*)?/i);
+  if(!hit)throw Error('请输入直播间号或 live.douyin.com 链接；短链接需先在浏览器展开');
+  const url=new URL(hit[0].replace(/[;；、)）]+$/g,''));
+  if(url.hostname!=='live.douyin.com'||url.port||url.username||url.password)throw Error('抖音链接不合法');
+  const id=url.pathname.split('/').filter(Boolean)[0]||'';
+  if(!/^[0-9A-Za-z_-]{1,100}$/.test(id))throw Error('无法解析直播间号');
+  return id;
+ }
+ function normalizeDouyinField(){try{if(config.value.douyin?.room)config.value.douyin.room=normalizeDouyinRoom(config.value.douyin.room)}catch(e){message(e.message,'error')}}
+
  const filters=[{id:'all',name:'全部'},{id:'bilibili',name:'B站'},{id:'douyin',name:'抖音'}];
  const logCategoryName=category=>({system:'系统',queue:'排队',bilibili:'B站',douyin:'抖音'})[category]||category;
  const platformName=platform=>({bilibili:'B站',douyin:'抖音',manual:'手动'})[platform]||platform;
@@ -19,7 +53,7 @@ createApp({setup(){
  const filteredLogs=computed(()=>logs.value.filter(l=>(logLevel.value==='ALL'||logOrder[l.level]>=logOrder[logLevel.value])&&(logCategory.value==='all'||l.category===logCategory.value)&&(!logSearch.value||`${l.level} ${l.category} ${l.message}`.toLowerCase().includes(logSearch.value.toLowerCase()))));
  const visibleQueue=computed(()=>queue.value.filter(q=>!queueSearch.value||`${q.username} ${q.note} ${q.mode} ${q.platform} ${q.user_id}`.toLowerCase().includes(queueSearch.value.toLowerCase())));
  const selectedIndex=computed(()=>queue.value.findIndex(q=>q.key===selectedKey.value));
- const connectedCount=computed(()=>platforms.filter(p=>statuses.value[p.id]?.connected).length);
+ const connectedCount=computed(()=>monitorPlatforms.value.filter(p=>statuses.value[p.id]?.connected).length);
  const filteredMessages=computed(()=>[...messages.value].reverse().filter(m=>filter.value==='all'||filter.value===m.platform));
  const dateTime=t=>{try{return new Date(t).toLocaleTimeString('zh-CN',{hour12:false})}catch{return ''}};
  let eventStream=null, poller=null, clock=null;
@@ -38,8 +72,8 @@ createApp({setup(){
  watch([filteredLogs,autoScroll],()=>{if(autoScroll.value)nextTick(()=>{const el=logListRef.value;if(el)el.scrollTop=el.scrollHeight})},{flush:'post'});
  async function refresh(){try{const [s,q,m,slots]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages'),api('/api/queue/slots')]);status.value=s;queue.value=q;messages.value=m;slotInfo.value=slots;selectedSlot.value=slots.active_slot}catch(e){message(e.message,'error')}}
  async function loadAppearance(){try{const appearance=await api('/api/appearance');const mode=appearance.mode==='light'?'light':'dark';const colors=appearance[mode]||{};const root=document.documentElement;const mapping={'--bg':'background','--panel':'surface','--panel2':'surface_alt','--line':'border','--text':'text','--dim':'muted','--accent':'accent'};for(const [css,k] of Object.entries(mapping)){const value=colors[k];if(typeof value==='string' && /^#[0-9a-fA-F]{3,8}$/.test(value))root.style.setProperty(css,value)}root.style.colorScheme=mode}catch{}}
- async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
- async function saveConfig(){busy.value=true;try{config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
+ async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;previousBiliEnabled.value=!!config.value.bilibili?.enabled;if(!Array.isArray(config.value.visible_platforms))config.value.visible_platforms=platformCatalog.filter(p=>config.value[p.id]?.enabled).map(p=>p.id);if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
+ async function saveConfig(){busy.value=true;try{if(config.value.douyin?.room)config.value.douyin.room=normalizeDouyinRoom(config.value.douyin.room);if(config.value.bilibili?.enabled&&!cookieConfigured.value.bilibili&&!String(config.value.bilibili.cookie||'').trim()&&!previousBiliEnabled.value)throw Error('请先扫码登录 B站，再开启弹幕监听');config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
  async function loadGiftStatus(){try{giftStatus.value=await api('/api/gifts/state')}catch(e){message(e.message,'error')}}
  async function loadObsStyle(){try{obsStyle.value=await api('/api/style')}catch(e){message(e.message,'error')}}
  async function saveObsStyle(){busy.value=true;try{await api('/api/style',{method:'POST',body:JSON.stringify(obsStyle.value)});message('OBS 样式已保存','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
@@ -73,7 +107,7 @@ createApp({setup(){
  function stopQR(){if(qrTimer!==null){clearInterval(qrTimer);qrTimer=null}}
  async function pollQR(){if(qrPolling || !qrImage.value)return;qrPolling=true;
   try{const result=await api('/api/bili/qr/poll',{method:'POST',body:'{}'});
-   if(result.status==='success'){stopQR();qrImage.value='';qrLink.value='';qrState.value='扫码登录成功：'+(result.username||result.uid);message(qrState.value,'success');await loadConfig();}
+   if(result.status==='success'){stopQR();qrImage.value='';qrLink.value='';qrState.value='扫码登录成功：'+(result.username||result.uid);message(qrState.value,'success');const d=await api('/api/config');cookieConfigured.value=d.cookie_configured;}
    else{qrState.value=result.message||'等待手机扫码';}
   }catch(e){stopQR();qrImage.value='';qrState.value=e.message;message('B站扫码：'+e.message,'error')}
   finally{qrPolling=false}
@@ -83,7 +117,7 @@ createApp({setup(){
   qrImage.value=qrSVG(r.url);qrLink.value=r.url;qrState.value='使用哔哩哔哩手机 App 扫码，并在手机端确认登录';qrTimer=setInterval(pollQR,2500);
  }catch(e){qrState.value=e.message;message(e.message,'error')}}
  async function logoutBili(){if(!window.confirm('确认清除 Go 版已保存的 B站登录 Cookie？'))return;
-  stopQR();qrImage.value='';try{await api('/api/bili/logout',{method:'POST',body:'{}'});qrState.value='已清除登录会话';await loadConfig();message('已清除 B站登录 Cookie','success')}catch(e){message(e.message,'error')}
+  stopQR();qrImage.value='';try{await api('/api/bili/logout',{method:'POST',body:'{}'});qrState.value='已清除登录会话';const d=await api('/api/config');cookieConfigured.value=d.cookie_configured;message('已清除 B站登录 Cookie','success')}catch(e){message(e.message,'error')}
  }
  async function checkOnboarding(){try{const response=await api('/api/onboarding');wizardLoaded.value=true;if(!response.completed){wizardStep.value=0;wizardError.value='';if(config.value.bilibili?.room==='3049445'&&!config.value.bilibili.enabled)config.value.bilibili.room='';wizardOpen.value=true}}catch(e){message('读取首次配置向导状态失败：'+e.message,'error')}}
  function openWizard(){wizardStep.value=0;wizardOpen.value=true;wizardError.value='';wizardLoaded.value=true}
@@ -96,6 +130,8 @@ createApp({setup(){
    if(config.value.bilibili.enabled&&!String(config.value.bilibili.room||'').trim()){wizardError.value='请填写 B站直播间号，或暂时关闭 B站监听';wizardStep.value=1;return}
    if(config.value.douyin.enabled&&!String(config.value.douyin.room||'').trim()){wizardError.value='请填写抖音直播间地址，或暂时关闭抖音监听';wizardStep.value=1;return}
    wizardBusy.value=true;
+   if(config.value.bilibili.enabled)config.value.visible_platforms=[...new Set([...(config.value.visible_platforms||[]),'bilibili'])];
+   if(config.value.douyin.enabled)config.value.visible_platforms=[...new Set([...(config.value.visible_platforms||[]),'douyin'])];
    try{const saved=await saveConfig();if(!saved){wizardError.value='保存失败，请检查页面顶部提示或配置内容';return;}
       await api('/api/onboarding',{method:'POST',body:JSON.stringify({completed:true})});
       wizardOpen.value=false;stopQR();qrImage.value='';message('初始设置完成，平台监听已更新','success');
@@ -117,5 +153,5 @@ createApp({setup(){
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
  onMounted(()=>{refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
  onUnmounted(()=>{if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
- return {page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');

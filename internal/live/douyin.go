@@ -31,6 +31,7 @@ var (
 	douyinRoom   = regexp.MustCompile(`(?:\\?"(?:roomId|room_id|web_rid)\\?"\s*:\s*\\?")(\d+)`)
 	douyinUnique = regexp.MustCompile(`(?:\\?"(?:user_unique_id|userUniqueId)\\?"\s*:\s*\\?")(\d+)`)
 	douyinPath   = regexp.MustCompile(`^[0-9A-Za-z_-]{1,100}$`)
+	douyinSharedLink = regexp.MustCompile(`https?://[^\s"<>，。]+`)
 )
 
 type douyinInfo struct{ LiveID, RoomID, UniqueID, TTWID string }
@@ -38,11 +39,14 @@ type douyinInfo struct{ LiveID, RoomID, UniqueID, TTWID string }
 func douyinLiveID(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if strings.Contains(s, "://") {
-		u, e := url.Parse(s)
+		// Pasted share text can include a URL surrounded by prose.
+		match := douyinSharedLink.FindString(s)
+		if match == "" { return "", errors.New("请输入房间号或 live.douyin.com 链接") }
+		u, e := url.Parse(strings.TrimRight(match, "；;、)]）"))
 		if e != nil {
 			return "", e
 		}
-		if u.Host != "live.douyin.com" {
+		if u.Hostname() != "live.douyin.com" || u.Port() != "" || u.User != nil {
 			return "", errors.New("仅接受 live.douyin.com 直播链接")
 		}
 		s = strings.Trim(u.Path, "/")

@@ -18,7 +18,7 @@
   <div class="page-title"><div><p class="eyebrow">WINDOWS LOG CONSOLE</p><h1>运行日志</h1><p class="muted">参考 Python Windows 版日志页，实时查看连接、弹幕、排队与系统事件。</p></div>
    <div class="title-actions"><span class="pill" :class="streamReady?'active':'inactive'">{{streamReady?'● 实时连接中':'○ 正在重连'}}</span><button class="btn" @click="refreshLogs">刷新日志</button></div>
   </div>
-  <div class="platform-grid log-status-grid"><article v-for="p in platforms" :key="p.id" class="panel platform"><div class="platform-head"><div><span class="platform-icon" :class="p.id">{{p.id==='bilibili'?'B':'抖'}}</span><strong>{{p.name}}</strong></div><span class="pill" :class="statuses[p.id]?.connected?'active':'inactive'">{{statuses[p.id]?.connected?'已连接':'未连接'}}</span></div><p class="platform-room">{{config[p.id]?.room || '尚未设置直播间'}}</p><p class="platform-help">{{statuses[p.id]?.message || '等待连接状态'}}</p></article></div>
+  <div class="platform-grid log-status-grid"><article v-for="p in monitorPlatforms" :key="p.id" class="panel platform"><div class="platform-head"><div><span class="platform-icon" :class="p.id">{{p.id==='bilibili'?'B':'抖'}}</span><strong>{{p.name}}</strong></div><span class="pill" :class="statuses[p.id]?.connected?'active':'inactive'">{{statuses[p.id]?.connected?'已连接':'未连接'}}</span></div><p class="platform-room">{{config[p.id]?.room || '尚未设置直播间'}}</p><p class="platform-help">{{statuses[p.id]?.message || '等待连接状态'}}</p></article></div>
   <section class="panel log-panel"><div class="panel-title"><div><h2>实时运行记录</h2><small>最近最多保留 500 条日志；清空仅清除当前浏览器显示</small></div><span class="counter">{{filteredLogs.length}} / {{logs.length}} 条</span></div>
    <div class="log-toolbar"><label class="search-label"><span>搜索</span><input v-model.trim="logSearch" placeholder="按关键字搜索日志" aria-label="搜索日志"></label>
     <label class="select-label"><span>级别</span><select v-model="logLevel" aria-label="日志级别"><option value="ALL">全部</option><option value="DEBUG">DEBUG</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></label>
@@ -32,21 +32,39 @@
 </template>
 <template v-else-if="page==='queue'">
   <div class="page-title"><div><p class="eyebrow">QUEUE MANAGEMENT</p><h1>当前排队管理</h1><p class="muted">参照 Python Windows 版队列表格，支持选中操作和 10 个存档槽位。</p></div><button class="btn" @click="refresh">刷新队列</button></div>
-  <div class="queue-summary"><span class="summary-metric"><b>{{queue.length}}</b> 当前排队</span><span class="summary-metric"><b>{{selectedSlot}}</b> 当前槽位</span><span class="summary-metric"><b>{{connectedCount}} / 2</b> 在线平台</span></div>
+  <div class="queue-summary"><span class="summary-metric"><b>{{queue.length}}</b> 当前排队</span><span class="summary-metric"><b>{{selectedSlot}}</b> 当前槽位</span><span class="summary-metric"><b>{{connectedCount}} / {{enabledMonitorCount}}</b> 在线平台</span></div>
   <section class="panel queue-manager"><div class="queue-manager-bar"><label>排队存档 <select v-model.number="selectedSlot" @change="changeSlot"><option v-for="n in 10" :key="n" :value="n">存档 {{n}}（{{slotInfo.slots[n]||0}} 人）</option></select></label><label class="search-label">筛选用户 <input v-model.trim="queueSearch" placeholder="用户名、备注或平台"></label><span class="tip">所有平台共享所选槽位，切换前将自动保存当前队列。</span></div>
    <div class="queue-table-wrap"><table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>
-   <tbody><tr v-for="(q,i) in visibleQueue" :key="q.key" @click="selectedKey=q.key" :class="{chosen:selectedKey===q.key}" tabindex="0" @keydown.enter="selectedKey=q.key" :aria-selected="selectedKey===q.key"><td><b class="rank">{{queue.findIndex(item=>item.key===q.key)+1}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td><span class="source" :class="q.platform">{{platformName(q.platform)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{dateTime(q.at)}}</td></tr><tr v-if="visibleQueue.length===0"><td colspan="6" class="empty">当前槽位没有符合筛选条件的队列条目</td></tr></tbody></table></div>
+   <tbody><tr v-for="(q,i) in visibleQueue" :key="q.key" @click="selectedKey=q.key" :class="{chosen:selectedKey===q.key}" tabindex="0" @keydown.enter="selectedKey=q.key" :aria-selected="selectedKey===q.key"><td><b class="rank">{{queue.findIndex(item=>item.key===q.key)+1}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform">{{platformName(q.platform)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{dateTime(q.at)}}</td></tr><tr v-if="visibleQueue.length===0"><td colspan="6" class="empty">当前槽位没有符合筛选条件的队列条目</td></tr></tbody></table></div>
    <div class="queue-controls"><div class="queue-editor"><input v-model.trim="newName" placeholder="输入新成员的用户名" maxlength="60" @keyup.enter="addQueue"><button class="btn primary" @click="addQueue" :disabled="!newName">追加到队尾</button><button class="btn" @click="insertQueue" :disabled="!newName">在选中项下方新增</button></div>
     <div class="queue-actions"><button class="btn small" @click="moveSelected(-1)" :disabled="selectedIndex<=0">上移</button><button class="btn small" @click="moveSelected(1)" :disabled="selectedIndex<0||selectedIndex>=queue.length-1">下移</button><button class="btn small" @click="editSelected" :disabled="selectedIndex<0">修改内容</button><button class="btn small" @click="removeSelected" :disabled="selectedIndex<0">删除选中</button><button class="btn small" @click="completeFirst" :disabled="!queue.length">完成首位</button><button class="btn danger-btn small" @click="clearQueue" :disabled="!queue.length">清空当前槽位</button></div>
    </div></section>
    <section class="panel log-footer-panel"><strong>管理提示</strong><p class="tip">可在「数据与存档」页导出当前槽位为兼容 Python 的 CSV。点击表格行选中成员，可上移、下移、修改备注或删除。使用「在选中项下方新增」保留原版 Windows 的插入位置操作；未选中时默认在队首插入。排队变更会同步到 OBS 展示和实时事件流。</p></section>
 </template>
-<template v-else-if="page==='settings'"><div class="page-title"><div><p class="eyebrow">PLATFORM CONFIGURATION</p><h1>平台与弹幕规则</h1><p class="muted">保存后自动重新连接；两个直播平台可以同时开启。</p></div></div><div class="settings-grid"><article class="panel settings-card" v-for="p in platforms" :key="p.id"><div class="setting-head"><h2>{{p.name}} 直播间</h2><label class="switch"><input type="checkbox" v-model="config[p.id].enabled"><span class="switch-bg"></span></label></div><label>直播间号或直播链接<input v-model.trim="config[p.id].room" :placeholder="p.placeholder" autocomplete="off"></label><label>Cookie（可选，需要时填写）<textarea v-model="config[p.id].cookie" :placeholder="cookieConfigured[p.id]?'已保存 Cookie；留空表示保持原值':'没有 Cookie 也可尝试连接'" rows="3"></textarea></label><p class="tip">{{p.id==='douyin'?'抖音直播页解析可能需要已登录 Cookie，接口规则变化可能导致接入失败。':'B站默认以匿名身份连接；需要时可设置登录 Cookie。'}}</p></article></div><article class="panel rules"><h2>B站扫码登录</h2>
-<p class="tip">使用 B站手机 App 扫码，确认后由 Go 后端验证会话并保存 Cookie。二维码和登录凭据不会发送到第三方二维码服务，也不会在控制台返回 Cookie。</p>
-<div class="manual"><button class="btn primary" :disabled="busy" @click="startQR">生成 B站登录二维码</button><button class="btn" @click="logoutBili" :disabled="!cookieConfigured.bilibili">退出登录（删除 Go 版 Cookie）</button></div>
-<div v-if="qrImage" class="qr-login"><img :src="qrImage" alt="B站扫码登录二维码" width="280" height="280"><p class="tip">使用 B站 App 扫描二维码，并在手机端确认；会自动检查扫码状态。</p></div>
-<p v-if="qrState" class="tip">{{qrState}}</p><p v-if="cookieConfigured.bilibili" class="tip">本地已保存 B站 Cookie（不代表会话尚未过期）。</p>
-</article><article class="panel rules"><h2>弹幕处理</h2><label class="check"><input type="checkbox" v-model="config.auto_queue"> 开启自动排队</label><label>排队关键词<input v-model.trim="config.command" maxlength="16" placeholder="排队"></label><div class="switch-grid"><label class="check"><input type="checkbox" v-model="config.switches.paidui"> 总排队开关</label><label class="check"><input type="checkbox" v-model="config.switches.guanfu_paidui"> 官服排队</label><label class="check"><input type="checkbox" v-model="config.switches.bfu_paidui"> B服排队</label><label class="check"><input type="checkbox" v-model="config.switches.chaoji_paidui"> 超级排队</label><label class="check"><input type="checkbox" v-model="config.switches.mifu_paidui"> 米服排队</label><label class="check"><input type="checkbox" v-model="config.switches.quxiao_paidui"> 自助取消</label><label class="check"><input type="checkbox" v-model="config.switches.xiugai_paidui"> 自助修改</label></div><label class="check"><input type="checkbox" v-model="config.switches.jianzhang_chadui"> 舰长插队</label><label>每日排队次数限制（0 为无限制）<input type="number" min="0" max="999" v-model.number="config.daily_queue_limit"></label><label>每日重置时间（本机时区，HH:MM）<input type="time" v-model="config.daily_queue_reset_time"></label><label>最大排队人数（0 为不限制）<input type="number" min="0" max="10000" v-model.number="config.max_queue"></label><label>语言设置<input v-model="config.language" placeholder="中文"></label><p class="tip">当前存档槽位：{{config.archive_slot || 1}}。10 个独立存档槽位可在「排队管理」页切换；支持导入原版存档 ZIP 内的所有槽位。</p><p class="tip">发送关键词，或「关键词 + 空格 + 备注」入队。同平台同用户不能重复入队，手动移除后可重新排队。</p></article><button class="btn primary submit" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存并重新连接'}}</button>
+
+<template v-else-if="page==='settings'">
+ <div class="page-title"><div><p class="eyebrow">PLATFORM CONFIGURATION</p><h1>平台与弹幕规则</h1><p class="muted">按需添加多个平台，监听共享当前存档队列。</p></div></div>
+ <section class="panel channel-toolbar"><div><h2>直播平台</h2><p class="tip">默认隐藏未添加的平台。点击「＋ 添加平台」增加配置；保存后才会连接或停止监听。</p></div>
+  <div class="channel-add"><button class="btn primary" type="button" @click="showPlatformPicker=!showPlatformPicker" :aria-expanded="showPlatformPicker">＋ 添加平台</button>
+   <div v-if="showPlatformPicker" class="channel-picker"><button v-for="p in addablePlatforms" :key="p.id" @click="addPlatform(p.id)" type="button">{{p.name}} <small>{{p.supported?'弹幕监听可用':'占位预留'}}</small></button><p v-if="!addablePlatforms.length" class="tip">所有平台已添加</p></div>
+  </div></section>
+ <div v-if="!configuredPlatforms.length" class="panel channel-empty">暂无平台配置，点击上方「＋ 添加平台」选择。</div>
+ <div class="settings-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id">
+  <div class="setting-head"><div><h2>{{p.name}}</h2><small :class="p.supported?'support-ok':'support-pending'">{{p.supported?'可用 · 独立监听、统一排队':'占位 · 暂未支持监听'}}</small></div>
+    <div class="channel-head-actions"><label v-if="p.supported" class="switch"><input type="checkbox" v-model="config[p.id].enabled" :aria-label="'启用'+p.name"><span class="switch-bg"></span></label><button type="button" class="btn small" @click="removePlatform(p.id)">移除</button></div></div>
+  <label>直播间号或直播链接<input v-model.trim="config[p.id].room" :placeholder="p.placeholder" autocomplete="off" @blur="p.id==='douyin'&&normalizeDouyinField()"></label>
+  <template v-if="p.id==='bilibili'"><p class="tip">B站需要先扫码登录再开启监听（已配置匿名监听的旧存档仍可读取）。Cookie 仅存储在本机。</p>
+    <p :class="cookieConfigured.bilibili?'support-ok':'support-pending'">{{cookieConfigured.bilibili?'已保存登录信息（可能需要重新验证）':'未登录，请先扫码'}}</p>
+    <div class="channel-login"><button type="button" class="btn primary small" :disabled="busy" @click="startQR">B站扫码登录</button><button type="button" class="btn small" :disabled="!cookieConfigured.bilibili" @click="logoutBili">退出登录</button></div>
+    <div v-if="qrImage" class="qr-login"><img :src="qrImage" width="220" height="220" alt="B站扫码登录二维码"><p class="tip">用哔哩哔哩 App 扫码并确认，登录状态自动刷新。</p></div><p v-if="qrState" class="tip">{{qrState}}</p>
+    <details class="channel-advanced"><summary>高级：手动填写 B站 Cookie</summary><textarea v-model="config.bilibili.cookie" rows="2" :placeholder="cookieConfigured.bilibili?'已保存，留空保留':'手动粘贴 Cookie'"></textarea></details>
+  </template>
+  <template v-else-if="p.id==='douyin'"><p class="tip">可直接输入数字房间号，或粘贴 live.douyin.com 网址及包含网址的分享文案，自动解析。短链接需先在浏览器展开。</p>
+    <details class="channel-advanced"><summary>高级：Cookie（通常无需配置）</summary><textarea v-model="config.douyin.cookie" rows="2" :placeholder="cookieConfigured.douyin?'已保存，留空保留':'仅在网页请求登录时需要'"></textarea></details>
+  </template>
+  <p v-else class="tip">{{p.description}}该平台目前仅支持保存配置，不会尝试连接或显示在线状态。</p>
+ </article></div>
+<article class="panel rules"><h2>弹幕处理</h2><label class="check"><input type="checkbox" v-model="config.auto_queue"> 开启自动排队</label><label>排队关键词<input v-model.trim="config.command" maxlength="16" placeholder="排队"></label><div class="switch-grid"><label class="check"><input type="checkbox" v-model="config.switches.paidui"> 总排队开关</label><label class="check"><input type="checkbox" v-model="config.switches.guanfu_paidui"> 官服排队</label><label class="check"><input type="checkbox" v-model="config.switches.bfu_paidui"> B服排队</label><label class="check"><input type="checkbox" v-model="config.switches.chaoji_paidui"> 超级排队</label><label class="check"><input type="checkbox" v-model="config.switches.mifu_paidui"> 米服排队</label><label class="check"><input type="checkbox" v-model="config.switches.quxiao_paidui"> 自助取消</label><label class="check"><input type="checkbox" v-model="config.switches.xiugai_paidui"> 自助修改</label></div><label class="check"><input type="checkbox" v-model="config.switches.jianzhang_chadui"> 舰长插队</label><label>每日排队次数限制（0 为无限制）<input type="number" min="0" max="999" v-model.number="config.daily_queue_limit"></label><label>每日重置时间（本机时区，HH:MM）<input type="time" v-model="config.daily_queue_reset_time"></label><label>最大排队人数（0 为不限制）<input type="number" min="0" max="10000" v-model.number="config.max_queue"></label><label>语言设置<input v-model="config.language" placeholder="中文"></label><p class="tip">当前存档槽位：{{config.archive_slot || 1}}。10 个独立存档槽位可在「排队管理」页切换；支持导入原版存档 ZIP 内的所有槽位。</p><p class="tip">发送关键词，或「关键词 + 空格 + 备注」入队。同平台同用户不能重复入队，手动移除后可重新排队。</p></article><button class="btn primary submit" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存并重新连接'}}</button>
  <article class="panel rules"><h2>礼物排队资格（B站）</h2><p class="tip">默认关闭。只接收 B站直播连接里的 SEND_GIFT；已知礼物目录按电池门槛计算，或按精确礼物名授予资格。此版不支持导入旧版本已消费资格。</p>
 <label class="check"><input type="checkbox" v-model="config.gift_queue.enabled">启用礼物排队资格</label>
 <label class="check"><input type="checkbox" v-model="config.gift_queue.gift_only">只允许用礼物资格入队（发送「插队」）</label>
@@ -79,16 +97,41 @@
 </template>
 <template v-else-if="page==='overlay'">
 <div class="page-title"><div><p class="eyebrow">OBS OVERLAY</p><h1>OBS 展示设置</h1><p class="muted">对应 Windows 版「透明窗口」功能的 Web 展示部分；保存后 OBS 浏览器源自动更新。</p></div><a class="btn" href="/overlay.html" target="_blank" rel="noopener">预览 OBS 展示 ↗</a></div>
-<article class="panel rules"><h2>OBS 样式</h2><p class="tip">修改后保存到本地；OBS 展示页每 12 秒刷新样式，也可直接重新载入浏览器源。</p>
-<label>队列字体大小（px）<input type="number" min="12" max="120" v-model.number="obsStyle.queue_font_size"></label>
-<label>队列条目间距（px）<input type="number" min="0" max="100" v-model.number="obsStyle.queue_item_gap"></label>
-<label>队列字体<input v-model="obsStyle.queue_font_family"></label>
-<label>文字颜色（#RRGGBB）<input v-model="obsStyle.text_color" maxlength="9"></label>
-<label>背景主色（#RRGGBB）<input v-model="obsStyle.bg1" maxlength="9"></label>
-<label class="check"><input type="checkbox" v-model="obsStyle.show_sequence">显示排队序号</label>
-<label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">开启自动滚动</label>
-<label class="check"><input type="checkbox" v-model="obsStyle.text_stroke_enabled">文字描边</label>
-<button class="btn primary" :disabled="busy" @click="saveObsStyle">保存 OBS 样式</button></article><section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">在 OBS 中添加浏览器源，地址填写 http://127.0.0.1:9816/overlay.html。本版本是 Web 透明展示，不提供原版 Tk 桌面悬浮窗或系统级窗口置顶能力。</p></section>
+<article class="panel rules obs-style-editor"><h2>OBS 排队样式（兼容 Windows 常用参数）</h2><p class="tip">保存到 style-web.json。样式保存后 OBS 页面自动刷新；不修改 Python/Tk 的 style-win.json。</p>
+<div class="obs-style-grid">
+<fieldset><legend>字体和文本</legend>
+ <label>字体大小（px）<input type="number" min="12" max="120" v-model.number="obsStyle.queue_font_size"></label>
+ <label>字体名称<input v-model.trim="obsStyle.queue_font_family"></label>
+ <label>字重<select v-model="obsStyle.queue_font_weight"><option value="400">常规</option><option value="500">中等</option><option value="700">加粗</option><option value="900">特粗</option></select></label>
+ <label>字体形态<select v-model="obsStyle.queue_font_style"><option value="normal">正常</option><option value="italic">斜体</option></select></label>
+ <label>文字对齐<select v-model="obsStyle.queue_text_align"><option value="left">左</option><option value="center">居中</option><option value="right">右</option></select></label>
+ <label>字间距（px）<input type="number" min="-10" max="30" v-model.number="obsStyle.queue_letter_spacing"></label>
+ <label>词间距（px）<input type="number" min="-10" max="30" v-model.number="obsStyle.queue_word_spacing"></label>
+ <label>行高<input type="number" min="0.8" max="3" step=".05" v-model.number="obsStyle.queue_line_height"></label>
+ <label>文字透明度（0–100）<input type="number" min="0" max="100" v-model.number="obsStyle.queue_text_opacity"></label>
+</fieldset><fieldset><legend>排版与位置</legend>
+ <label>条目间距（px）<input type="number" min="0" max="100" v-model.number="obsStyle.queue_item_gap"></label>
+ <label>条目水平留白（px）<input type="number" min="0" max="120" v-model.number="obsStyle.queue_item_padding_x"></label>
+ <label>条目垂直留白（px）<input type="number" min="0" max="100" v-model.number="obsStyle.queue_item_padding_y"></label>
+ <label>背景圆角（px）<input type="number" min="0" max="60" v-model.number="obsStyle.board_radius"></label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_header">显示标题及存档</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_sequence">显示序号</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_platform">显示来源平台</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">自动滚动</label>
+</fieldset><fieldset><legend>色彩与效果</legend>
+ <label>文字颜色<input v-model.trim="obsStyle.text_color" placeholder="#eaf6ff"></label>
+ <label>背景色 1<input v-model.trim="obsStyle.bg1" placeholder="#0e2036"></label>
+ <label>背景色 2<input v-model.trim="obsStyle.bg2" placeholder="#060b14"></label>
+ <label>背景色 3<input v-model.trim="obsStyle.bg3" placeholder="#020409"></label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_background">显示背景</label>
+ <label>背景不透明度（0–100）<input type="number" min="0" max="100" v-model.number="obsStyle.background_opacity"></label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.text_stroke_enabled">文字描边</label>
+ <label>描边颜色<input v-model.trim="obsStyle.text_stroke_color" placeholder="#000000"></label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.queue_gradient_enabled">文字渐变</label>
+ <label>文字渐变起始色<input v-model.trim="obsStyle.text_grad_start" placeholder="#ffffff"></label>
+ <label>文字渐变结束色<input v-model.trim="obsStyle.text_grad_end" placeholder="#aaccff"></label>
+</fieldset></div>
+<div class="manual"><button class="btn primary" :disabled="busy" @click="saveObsStyle">保存 OBS 样式</button><button class="btn" @click="loadObsStyle">取消未保存修改</button></div><p class="tip">下方展示已保存样式的实时预览。</p><iframe class="obs-preview" title="OBS 实时排队预览" src="/overlay.html"></iframe></article><section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">在 OBS 中添加浏览器源，地址填写 http://127.0.0.1:9816/overlay.html。本版本是 Web 透明展示，不提供原版 Tk 桌面悬浮窗或系统级窗口置顶能力。</p></section>
 </template>
 <template v-else><div class="page-title"><div><p class="eyebrow">RELEASE MANAGEMENT</p><h1>检查并安装软件更新</h1><p class="muted">检查版本、下载、校验、备份旧程序、自动替换并重启。Windows 可直接在托盘运行时更新。</p></div></div>
 <article class="panel updates">

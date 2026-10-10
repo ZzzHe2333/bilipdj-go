@@ -29,6 +29,18 @@ jobs:
         run: |
           V=$(tr -d '\r\n' < VERSION)
           test "$(sed -n 's/^var version = \"\([^\"]*\)\"/\1/p' main.go)" = "$V"
+      - name: JavaScript syntax checks (UI and OBS)
+        shell: bash
+        run: |
+          node --check web/app.js
+          python3 - <<'PY'
+          from pathlib import Path
+          content = Path('web/overlay.html').read_text(encoding='utf-8')
+          inline = content.rsplit('<script>', 1)[-1].split('</script>', 1)[0]
+          assert inline.strip(), 'OBS inline script missing'
+          Path('/tmp/bilipdj-overlay-check.js').write_text(inline, encoding='utf-8')
+          PY
+          node --check /tmp/bilipdj-overlay-check.js
       - name: Unit tests
         run: go test ./...
       - name: Vet
