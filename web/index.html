@@ -101,7 +101,7 @@
  <button v-for="room in (config.listeners||[])" :key="room.id" type="button" class="channel-tab" role="tab" :aria-selected="activeChannelTab===room.id" :class="{selected:activeChannelTab===room.id}" @click="activeChannelTab=room.id">{{room.platform==='bilibili'?'B站':'抖音'}} · {{room.room||'新直播间'}}</button>
 </nav>
 <div v-if="!configuredPlatforms.length" class="panel channel-empty">暂无平台配置，点击上方「＋ 添加平台」选择。</div>
- <div class="settings-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id" v-show="activeChannelTab===p.id">
+ <div class="settings-grid channel-tabs-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id" v-show="activeChannelTab===p.id">
   <div class="setting-head"><div><h2>{{p.name}}</h2><small :class="p.supported?'support-ok':'support-pending'">{{p.supported?'可用 · 独立监听、统一排队':'占位 · 暂未支持监听'}}</small></div>
     <div class="channel-head-actions"><label v-if="p.supported" class="switch"><input type="checkbox" v-model="config[p.id].enabled" :aria-label="'启用'+p.name"><span class="switch-bg"></span></label><button type="button" class="btn small" @click="removePlatform(p.id)">移除</button></div></div>
   <label>直播间号或直播链接<input v-model.trim="config[p.id].room" :placeholder="p.placeholder" autocomplete="off" @blur="p.id==='douyin'&&normalizeDouyinField()"></label>
