@@ -105,7 +105,7 @@ createApp({setup(){
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
- const queueEditing=ref(false),queueEditKey=ref(''),queueEditName=ref(''),queueEditNote=ref(''),queueEditSource=ref('');
+ const queueEditing=ref(false),queueEditKey=ref(''),queueEditSlot=ref(0),queueEditName=ref(''),queueEditNote=ref(''),queueEditSource=ref('');
  const queueEditManual=computed(()=>{const q=queue.value.find(v=>v.key===queueEditKey.value);return !!q&&q.platform==='manual'&&/^(manual|admin):/.test(q.key)});
  const sorting=ref(false),sortKeys=ref([]),sortBefore=ref([]),draggingKey=ref('');
  const sortedQueue=computed(()=>sorting.value?sortKeys.value.map(k=>queue.value.find(q=>q.key===k)).filter(Boolean):queue.value);
@@ -118,20 +118,21 @@ createApp({setup(){
   if(busy.value||!sorting.value)return;
   busy.value=true;
   try{
-   queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value})});
+   queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value,slot:Number(selectedSlot.value)})});
    cancelSorting();message('已保存新的排队顺序','success');
   }catch(e){message('排序未保存：'+e.message,'error');await refresh()}
   finally{busy.value=false}
  }
  function openQueueEditor(q){
   if(!q||sorting.value)return;
-  queueEditKey.value=q.key;selectedKey.value=q.key;
+  queueEditKey.value=q.key;queueEditSlot.value=Number(selectedSlot.value);selectedKey.value=q.key;
   queueEditName.value=q.username||'';queueEditNote.value=q.note||'';
   queueEditSource.value=q.platform==='manual'?q.source_platform||'':q.platform;
   queueEditing.value=true;
  }
  async function saveQueueEditor(){
   if(busy.value)return;
+  if(queueEditSlot.value!==Number(selectedSlot.value)){queueEditing.value=false;message('排队存档已切换，请重新编辑','error');return}
   const q=queue.value.find(v=>v.key===queueEditKey.value);
   if(!q){queueEditing.value=false;message('成员已变动，请刷新','error');return}
   const payload={action:'edit',key:q.key,note:queueEditNote.value};
