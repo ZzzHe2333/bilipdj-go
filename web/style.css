@@ -90,9 +90,12 @@
 .perf-inputs{display:grid;grid-template-columns:minmax(0,1fr) 152px;align-items:end;gap:26px;margin:21px 0}
 .perf-slider-wrap{min-width:0}
 .perf-slider-wrap input[type=range]{display:block;width:100%;margin:0;padding:0;height:29px;accent-color:var(--accent);cursor:pointer;touch-action:pan-y}
-.perf-ticks{display:flex;justify-content:space-between;align-items:flex-start;margin-top:7px;gap:3px;color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
-.perf-ticks span{flex:0 0 auto}.perf-ticks span:nth-child(2),.perf-ticks span:nth-child(3){position:relative}
-.perf-ticks span:nth-child(2){transform:translateX(-12%)}.perf-ticks span:nth-child(3){transform:translateX(13%)}
+.perf-ticks{position:relative;height:27px;margin-top:7px;color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
+.perf-ticks span{position:absolute;top:0;white-space:nowrap}
+.perf-ticks span:first-child{left:0}
+.perf-ticks span:nth-child(2){left:33.333%;transform:translateX(-50%)}
+.perf-ticks span:nth-child(3){left:66.667%;transform:translateX(-50%)}
+.perf-ticks span:last-child{right:0}
 .perf-interval-input{display:grid;gap:8px;white-space:nowrap;font-size:12px;color:var(--dim);font-weight:600}
 .perf-interval-input input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:16px}
 .perf-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
