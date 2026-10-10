@@ -53,7 +53,7 @@ createApp({setup(){
  const roleLabels={super_admin:'超级管理员',admin:'管理员',part_time:'兼职',user:'用户',blacklist:'黑名单'};
  const scopeLabel=p=>({all:'B站、抖音',bilibili:'B站',douyin:'抖音'})[p]||p;
  const roleLabel=p=>roleLabels[p]||p;
- const capLabel=id=>({moderate:'拉黑/取消拉黑',queue:'队列管理',insert:'插队命令',switch:'排队开关',limits:'人数上限'})[id]||id;
+ const capLabel=id=>({moderate:'拉黑/取消拉黑',queue:'队列管理',insert:'插队命令',switch:'排队开关',limits:'人数上限',guard_insert:'舰长插队资格'})[id]||id;
  async function loadPermissions(){
   if(permissionDirty.value)return;
   try{const result=await api('/api/permissions',{cache:'no-store'});permissionRows.value=result.entries||[];permissionCaps.value=result.capabilities||[]}
