@@ -1,27 +1,33 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BiliPDJ Go · OBS</title>
 <style>
-*{box-sizing:border-box}body{background:transparent;margin:0;color:white;font-family:system-ui,"Microsoft YaHei",sans-serif;overflow:hidden}[v-cloak]{display:none}
-#app{height:100vh;padding:14px}.board{max-height:100%;overflow:hidden;border-radius:18px;padding:18px}
+*{box-sizing:border-box}html,body{background:transparent!important;margin:0;color:white;font-family:system-ui,"Microsoft YaHei",sans-serif;overflow:hidden}[v-cloak]{display:none}
+#app{height:100vh;width:100%;padding:0;background:transparent}.board{max-height:100%;height:100%;overflow:hidden;border:0;box-shadow:none;backdrop-filter:none}
 header{font-size:22px;font-weight:800;margin-bottom:12px}header small{font-size:.7em;opacity:.8}
-ol{list-style:none;padding:0;margin:0;max-height:calc(100vh - 104px);overflow:auto;scrollbar-width:none}ol::-webkit-scrollbar{display:none}
-.board.no-header ol{max-height:calc(100vh - 53px)}
+ol{list-style:none;padding:0;margin:0;max-height:calc(100vh - 80px);overflow:auto;scrollbar-width:none}ol::-webkit-scrollbar{display:none}
+.board.no-header ol{max-height:100vh}
 li{display:flex;gap:12px;align-items:center;transition:transform .2s,opacity .2s;overflow-wrap:anywhere}
 .rank{flex:0 0 2em;opacity:.7}.entry{min-width:0;flex:1;overflow-wrap:anywhere}.note{font-size:.62em;opacity:.75}
 .badge{font-size:12px;opacity:.75;flex:none;display:inline-flex;justify-content:center;align-items:center;min-width:50px;text-align:center}
 p{opacity:.6}
 </style></head><body><div id="app" v-cloak>
 <section class="board" :class="{'no-header':style.show_header===false}" :style="boardStyle">
-<header v-if="style.show_header!==false">实时排队 <small>{{queue.length}} 人 · 槽位 {{activeSlot}}</small></header>
-<ol ref="scrollEl"><li v-for="(q,i) in queue" :key="q.key" :style="itemStyle">
+<header v-if="style.show_header!==false">实时排队 <small>{{displayQueue.length}} 人 · 槽位 {{activeSlot}}</small></header>
+<ol ref="scrollEl"><li v-for="(q,i) in displayQueue" :key="q.key" :style="itemStyle">
  <span class="rank" v-if="style.show_sequence">{{i+1}}.</span>
  <span class="entry" :style="entryAlignment"><span :style="entryTextStyle"><span v-if="q.mode">[{{q.mode}}] </span>{{q.username}}<span v-if="q.note" class="note"> · {{q.note}}</span></span></span>
  <small class="badge" v-if="style.show_platform!==false">{{queueSourceLabel(q)}}</small>
-</li></ol><p v-if="queue.length===0">暂无观众排队</p></section></div>
+</li></ol><p v-if="displayQueue.length===0">暂无观众排队</p></section></div>
 <script src="/vue.global.js"></script><script>
 const {createApp,ref,computed,onMounted,onUnmounted,nextTick}=Vue;
 createApp({setup(){
-const queue=ref([]),activeSlot=ref(1),style=ref({}),scrollEl=ref(null);
+const queue=ref([]),activeSlot=ref(1),savedStyle=ref({}),previewStyle=ref(null),scrollEl=ref(null),demoMode=ref(false);
+const demoEntries=[
+ {key:'obs-demo-1',username:'预览用户 A',note:'这里显示排队内容',platform:'manual',source_platform:''},
+ {key:'obs-demo-2',username:'预览用户 B',note:'可拖动字号滑块',platform:'bilibili'}
+];
+const displayQueue=computed(()=>demoMode.value&&queue.value.length===0?demoEntries:queue.value);
+const style=computed(()=>previewStyle.value??savedStyle.value);
 function numeric(key,fallback,min,max){const v=style.value[key];const n=Number(v);return v!==null&&v!==undefined&&v!==''&&Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback}
 function safeColor(v,fallback){return typeof v==='string'&&(/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)||/^rgba?\([\d., %]+\)$/.test(v))?v:fallback}
 function alphaColor(v,fallback,alpha){
@@ -33,11 +39,17 @@ const platformName=p=>({bilibili:'B站',douyin:'抖音',huya:'虎牙',kuaishou:'
 const queueSourceLabel=q=>q.platform==='manual'?platformName(q.source_platform):platformName(q.platform);
 const boardStyle=computed(()=>{
  const a=numeric('background_opacity',94,0,100)/100;
- return {background:style.value.show_background===false?'transparent':'linear-gradient(145deg,'+alphaColor(style.value.bg1,'#0e2036',a)+','+alphaColor(style.value.bg2,'#060b14',a)+','+alphaColor(style.value.bg3,'#020409',a)+')',
-  color:safeColor(style.value.text_color,'#eaf6ff'),borderRadius:numeric('board_radius',18,0,60)+'px'};
+ // Legacy versions saved show_background=true. New transparent_background opts
+ // out of any old panel fill unless the user explicitly turns it off in settings.
+ const transparent=style.value.transparent_background!==false;
+ const background=transparent||style.value.show_background===false?'transparent':
+  'linear-gradient(145deg,'+alphaColor(style.value.bg1,'#0e2036',a)+','+alphaColor(style.value.bg2,'#060b14',a)+','+alphaColor(style.value.bg3,'#020409',a)+')';
+ return {background, color:safeColor(style.value.text_color,'#eaf6ff'),
+  borderRadius:transparent?'0px':numeric('board_radius',18,0,60)+'px',
+  padding:transparent?'0px':'18px',boxShadow:'none'};
 });
 const itemStyle=computed(()=>({
- fontSize:numeric('queue_font_size',50,12,120)+'px',fontFamily:style.value.queue_font_family||'Microsoft YaHei, sans-serif',
+ fontSize:numeric('queue_font_size',50,10,200)+'px',fontFamily:style.value.queue_font_family||'Microsoft YaHei, sans-serif',
  fontWeight:['400','500','600','700','800','900'].includes(String(style.value.queue_font_weight))?String(style.value.queue_font_weight):'700',
  fontStyle:style.value.queue_font_style==='italic'?'italic':'normal',
  letterSpacing:numeric('queue_letter_spacing',0,-10,30)+'px',
@@ -52,12 +64,25 @@ const entryAlignment=computed(()=>({textAlign:['left','center','right'].includes
 const entryTextStyle=computed(()=>style.value.queue_gradient_enabled?{
  background:'linear-gradient(90deg,'+safeColor(style.value.text_grad_start,'#ffffff')+','+safeColor(style.value.text_grad_end,'#aaccff')+')',
  WebkitBackgroundClip:'text',backgroundClip:'text',WebkitTextFillColor:'transparent'}:{});
-async function refreshStyle(){try{const r=await fetch('/api/style',{cache:'no-store'});if(r.ok)style.value=await r.json()}catch{}}
+async function refreshStyle(){try{const r=await fetch('/api/style',{cache:'no-store'});if(r.ok)savedStyle.value=await r.json()}catch{}}
 async function loadQueue(){try{const r=await fetch('/api/queue',{cache:'no-store'});if(r.ok)queue.value=await r.json();const slots=await fetch('/api/queue/slots',{cache:'no-store'});if(slots.ok)activeSlot.value=(await slots.json()).active_slot||1}catch{}}
 async function scrollQueue(){if(!style.value.auto_scroll||!scrollEl.value)return;await nextTick();const el=scrollEl.value;el.scrollTop=el.scrollTop>=el.scrollHeight-el.clientHeight-2?0:Math.min(el.scrollHeight-el.clientHeight,el.scrollTop+1)}
+function applyPreviewMessage(event){
+ if(window.parent===window||event.source!==window.parent||event.origin!==window.location.origin)return;
+ if(event.data?.type!=='bilipdj:obs-preview-style')return;
+ const v=event.data.style;
+ if(v===null){previewStyle.value=null;demoMode.value=false;return;}
+ if(v&&typeof v==='object'&&!Array.isArray(v)){previewStyle.value={...v};demoMode.value=true;}
+}
 let events,stylePoll,queuePoll,scrollTimer;
-onMounted(()=>{refreshStyle();loadQueue();events=new EventSource('/api/events');events.onmessage=e=>{try{const x=JSON.parse(e.data);if(x.type==='queue')queue.value=x.data}catch{}};stylePoll=setInterval(refreshStyle,12000);queuePoll=setInterval(loadQueue,25000);scrollTimer=setInterval(scrollQueue,80)});
-onUnmounted(()=>{events?.close();clearInterval(stylePoll);clearInterval(queuePoll);clearInterval(scrollTimer)});
-return {queue,activeSlot,style,itemStyle,boardStyle,entryAlignment,entryTextStyle,platformName,queueSourceLabel,scrollEl};
+onMounted(()=>{
+ window.addEventListener('message',applyPreviewMessage);
+ refreshStyle();loadQueue();
+ events=new EventSource('/api/events');
+ events.onmessage=e=>{try{const x=JSON.parse(e.data);if(x.type==='queue')queue.value=x.data;else if(x.type==='style')savedStyle.value=x.data}catch{}};
+ stylePoll=setInterval(refreshStyle,8000);queuePoll=setInterval(loadQueue,25000);scrollTimer=setInterval(scrollQueue,80);
+});
+onUnmounted(()=>{window.removeEventListener('message',applyPreviewMessage);events?.close();clearInterval(stylePoll);clearInterval(queuePoll);clearInterval(scrollTimer)});
+return {queue,displayQueue,activeSlot,style,itemStyle,boardStyle,entryAlignment,entryTextStyle,platformName,queueSourceLabel,scrollEl};
 }}).mount('#app');
 </script></body></html>

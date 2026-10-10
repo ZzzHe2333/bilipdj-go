@@ -11,7 +11,7 @@
 <button :class="['nav',{selected:page==='storage'}]" @click="page='storage';loadStorage()"><span>▥</span> 数据与存档</button>
 <button :class="['nav',{selected:page==='update'}]" @click="page='update'"><span>↻</span> 软件更新</button>
 <div class="sidebar-bottom"><button type="button" class="wizard-reopen" @click="openWizard">新手配置引导 ↗</button><span class="dot" :class="streamReady?'online':'offline'"></span> {{streamReady?'实时事件流已连接':'事件流连接中'}}<p>v{{status.version || '0.1.0'}} · Go + Vue 3</p></div></aside>
-<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',storage:'数据与存档',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/overlay.html" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
+<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',storage:'数据与存档',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/index" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
 <main>
 <div v-if="notice" class="notice" :class="noticeLevel">{{notice}} <button @click="notice=''">×</button></div>
 <template v-if="page==='logs'">
@@ -96,11 +96,11 @@
 <button class="btn primary" :disabled="busy" @click="saveConfig">{{busy?'正在保存…':'保存权限配置'}}</button></section>
 </template>
 <template v-else-if="page==='overlay'">
-<div class="page-title"><div><p class="eyebrow">OBS OVERLAY</p><h1>OBS 展示设置</h1><p class="muted">对应 Windows 版「透明窗口」功能的 Web 展示部分；保存后 OBS 浏览器源自动更新。</p></div><a class="btn" href="/overlay.html" target="_blank" rel="noopener">预览 OBS 展示 ↗</a></div>
-<article class="panel rules obs-style-editor"><h2>OBS 排队样式（兼容 Windows 常用参数）</h2><p class="tip">保存到 style-web.json。样式保存后 OBS 页面自动刷新；不修改 Python/Tk 的 style-win.json。</p>
+<div class="page-title"><div><p class="eyebrow">OBS OVERLAY</p><h1>OBS 浏览器源样式</h1><p class="muted">旧版透明排队浏览器源 /index 已兼容；以下改动无需保存就会实时显示在预览框中。</p></div><a class="btn" href="/index" target="_blank" rel="noopener">单独打开 OBS 展示 ↗</a></div>
+<article class="panel rules obs-style-editor"><h2>队列文字与背景样式</h2><p class="tip">修改立即反映在下方预览，点击保存才会同步到 OBS 和 style-web.json；不修改 Windows Tk 的 style-win.json。</p>
 <div class="obs-style-grid">
 <fieldset><legend>字体和文本</legend>
- <label>字体大小（px）<input type="number" min="12" max="120" v-model.number="obsStyle.queue_font_size"></label>
+ <div class="obs-font-size-control"><label for="obs-size-slider">排队字体大小：<strong>{{obsStyle.queue_font_size||50}} px</strong></label><div class="obs-size-controls"><input id="obs-size-slider" type="range" min="10" max="200" step="1" v-model.number="obsStyle.queue_font_size" aria-label="实时调整排队字号"><input type="number" min="10" max="200" step="1" v-model.number="obsStyle.queue_font_size" aria-label="精确输入字号"></div></div>
  <label>字体名称<input v-model.trim="obsStyle.queue_font_family"></label>
  <label>字重<select v-model="obsStyle.queue_font_weight"><option value="400">常规</option><option value="500">中等</option><option value="700">加粗</option><option value="900">特粗</option></select></label>
  <label>字体形态<select v-model="obsStyle.queue_font_style"><option value="normal">正常</option><option value="italic">斜体</option></select></label>
@@ -119,11 +119,13 @@
  <label class="check"><input type="checkbox" v-model="obsStyle.show_platform">显示来源平台</label>
  <label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">自动滚动</label>
 </fieldset><fieldset><legend>色彩与效果</legend>
+ <label class="check obs-important-check"><input type="checkbox" v-model="obsStyle.transparent_background">纯透明背景（推荐，原版 OBS 样式）</label>
+ <p class="tip">勾选后整个页面的背景 Alpha 为 0，即使以前存档设置过深色看板也会保持透明。</p>
  <label>文字颜色<input v-model.trim="obsStyle.text_color" placeholder="#eaf6ff"></label>
  <label>背景色 1<input v-model.trim="obsStyle.bg1" placeholder="#0e2036"></label>
  <label>背景色 2<input v-model.trim="obsStyle.bg2" placeholder="#060b14"></label>
  <label>背景色 3<input v-model.trim="obsStyle.bg3" placeholder="#020409"></label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_background">显示背景</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_background" :disabled="obsStyle.transparent_background">显示深色背景（先取消“纯透明背景”）</label>
  <label>背景不透明度（0–100）<input type="number" min="0" max="100" v-model.number="obsStyle.background_opacity"></label>
  <label class="check"><input type="checkbox" v-model="obsStyle.text_stroke_enabled">文字描边</label>
  <label>描边颜色<input v-model.trim="obsStyle.text_stroke_color" placeholder="#000000"></label>
@@ -131,7 +133,11 @@
  <label>文字渐变起始色<input v-model.trim="obsStyle.text_grad_start" placeholder="#ffffff"></label>
  <label>文字渐变结束色<input v-model.trim="obsStyle.text_grad_end" placeholder="#aaccff"></label>
 </fieldset></div>
-<div class="manual"><button class="btn primary" :disabled="busy" @click="saveObsStyle">保存 OBS 样式</button><button class="btn" @click="loadObsStyle">取消未保存修改</button></div><p class="tip">下方展示已保存样式的实时预览。</p><iframe class="obs-preview" title="OBS 实时排队预览" src="/overlay.html"></iframe></article><section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">在 OBS 中添加浏览器源，地址填写 http://127.0.0.1:9816/overlay.html。本版本是 Web 透明展示，不提供原版 Tk 桌面悬浮窗或系统级窗口置顶能力。</p></section>
+<div class="manual obs-editor-actions"><button class="btn primary" :disabled="busy" @click="saveObsStyle">保存并应用到 OBS</button><button class="btn" @click="loadObsStyle">恢复已保存样式</button></div>
+<div class="obs-preview-toolbar"><div><strong>实时效果预览</strong><p class="tip">调整上方字号或颜色即刻变化；仅在设置页显示棋盘格，实际 OBS 不包含棋盘格背景。如果队列为空，将显示两名演示成员。</p></div><label>预览底色<select v-model="obsPreviewBackdrop"><option value="checker">透明棋盘格</option><option value="dark">暗色背景</option><option value="light">亮色背景</option><option value="green">绿色背景</option></select></label></div>
+<div class="obs-preview-stage" :class="'obs-backdrop-'+obsPreviewBackdrop"><iframe class="obs-preview" ref="obsPreviewFrame" title="OBS 透明实时预览" src="/index" @load="sendObsPreview"></iframe></div>
+<div class="obs-url-box"><label for="obs-url-field">OBS 浏览器源 URL<input id="obs-url-field" type="text" readonly :value="obsURL" @focus="$event.target.select()"></label><div class="quick-actions"><button class="btn primary small" @click="copyObsURL">复制浏览器源地址</button><a class="btn small" href="/index" target="_blank" rel="noopener">打开透明源 ↗</a></div></div></article>
+<section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">OBS → 添加「浏览器源」→ 把上方地址复制到 URL。以前 Python Web 版的 <code>/index</code> 地址已经兼容，之前 Go 的 <code>/overlay.html</code> 也继续有效。不同端口或远程访问请使用实际访问本程序的主机和端口；直接在系统浏览器中查看透明页面时，浏览器自身背景可能显示白色或黑色，透明度应在 OBS 中或上面的棋盘格预览确认。</p></section>
 </template>
 <template v-else><div class="page-title"><div><p class="eyebrow">RELEASE MANAGEMENT</p><h1>检查并安装软件更新</h1><p class="muted">检查版本、下载、校验、备份旧程序、自动替换并重启。Windows 可直接在托盘运行时更新。</p></div></div>
 <article class="panel updates">
