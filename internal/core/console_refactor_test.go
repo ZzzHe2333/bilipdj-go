@@ -137,3 +137,28 @@ func TestCommandParityFromPython(t *testing.T){
  app.OnDanmu(live.Event{Platform:"bilibili",Username:"Boss",UserID:"777",Content:"无影插 20 Allowed",Time:time.Now()})
  if len(app.queue)!=n+1{t.Fatal("Go rejected stealth insert within Python limit")}
 }
+
+func TestLegacyGuardDoesNotGainQueueManagementAfterPermissionsMigration(t *testing.T){
+ a:=New(t.TempDir(),"0.10.4","org/demo")
+ a.config.Guards=[]string{"GuardUser"}
+ legacy:=a.config.permissionRows()
+ found:=false
+ for _,p:=range legacy{
+  if p.Name=="GuardUser" {
+   found=true
+   if p.Role!="part_time"||len(p.Capabilities)!=1||p.Capabilities[0]!="guard_insert"{
+    t.Fatalf("legacy guard became moderator: %+v",p)
+   }
+  }
+ }
+ if !found{t.Fatal("legacy guard role not displayed")}
+ a.config.Permissions=legacy
+ a.config.Switches.GuardInsert=true
+ a.OnDanmu(live.Event{Platform:"bilibili",Username:"QueueOwner",UserID:"1",Content:"排队",Time:time.Now()})
+ a.OnDanmu(live.Event{Platform:"bilibili",Username:"GuardUser",UserID:"2",Content:"删除 1",Time:time.Now()})
+ if len(a.queue)!=1{t.Fatal("old guard gained queue-delete authority")}
+ a.OnDanmu(live.Event{Platform:"douyin",Username:"GuardUser",UserID:"3",Content:"插队",Time:time.Now()})
+ if len(a.queue)!=1{t.Fatal("Bilibili guard role leaked to Douyin")}
+ a.OnDanmu(live.Event{Platform:"bilibili",Username:"GuardUser",UserID:"2",Content:"插队",Time:time.Now()})
+ if len(a.queue)!=2{t.Fatal("legacy guard insert did not work")}
+}
