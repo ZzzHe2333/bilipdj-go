@@ -86,6 +86,9 @@ type QueueItem struct {
 	Mode     string    `json:"mode,omitempty"`
 	Key      string    `json:"key"`
 	Platform string    `json:"platform"`
+	// SourcePlatform is a human-entered display label on manually queued entries.
+	// Platform, UserID and Key remain the trusted origin/identity for live events.
+	SourcePlatform string `json:"source_platform,omitempty"`
 	UserID   string    `json:"user_id"`
 	Username string    `json:"username"`
 	Note     string    `json:"note"`
@@ -706,6 +709,8 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			Key    string `json:"key"`
 			Name   string `json:"name"`
 			Note   string `json:"note"`
+			NameEdit *string `json:"new_name,omitempty"`
+			SourcePlatform *string `json:"source_platform,omitempty"`
 			Index  int    `json:"index"`
 		}
 		if e := decode(r, &req); e != nil {
@@ -766,18 +771,42 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			copy(a.queue[req.Index+1:], a.queue[req.Index:])
 			a.queue[req.Index] = q
 		case "edit":
-			found := false
+			index := -1
 			for i := range a.queue {
 				if a.queue[i].Key == req.Key {
-					a.queue[i].Note = strings.TrimSpace(req.Note)
-					found = true
+					index = i
 					break
 				}
 			}
-			if !found {
+			if index < 0 {
 				send(w, 404, map[string]string{"error": "queue item not found"})
 				return
 			}
+			item := &a.queue[index]
+			manual := item.Platform == "manual" && (strings.HasPrefix(item.Key, "manual:") || strings.HasPrefix(item.Key, "admin:"))
+			if (req.NameEdit != nil || req.SourcePlatform != nil) && !manual {
+				send(w, 400, map[string]string{"error": "真实直播成员只允许修改备注，不允许更改认证姓名或来源"})
+				return
+			}
+			if req.NameEdit != nil {
+				name := strings.TrimSpace(*req.NameEdit)
+				if name == "" || len([]rune(name)) > 60 {
+					send(w, 400, map[string]string{"error": "用户名必须为 1 到 60 个字符"})
+					return
+				}
+				item.Username = name
+			}
+			if req.SourcePlatform != nil {
+				source := strings.TrimSpace(*req.SourcePlatform)
+				switch source {
+				case "", "bilibili", "douyin", "huya", "wechat_mp", "kuaishou", "douyu":
+					item.SourcePlatform = source
+				default:
+					send(w, 400, map[string]string{"error": "未知的手动来源平台"})
+					return
+				}
+			}
+			item.Note = strings.TrimSpace(req.Note)
 		default:
 			send(w, 400, map[string]string{"error": "unknown action"})
 			return
