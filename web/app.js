@@ -31,16 +31,13 @@ createApp({setup(){
  }
  const perfInterval=ref(savedPerfInterval()),perfData=ref(null),perfError=ref(''),perfLoading=ref(false);
  const perfCards=[
-  {key:'cpu',title:'进程 CPU',scope:'本项目进程',description:'本程序占全部逻辑处理器总算力的比例'},
-  {key:'system_cpu',title:'整机 CPU',scope:'整机',description:'包含其他软件的使用率'},
-  {key:'memory',title:'内存占用',scope:'本项目进程',description:'实际常驻物理内存，平台可能使用峰值替代'},
-  {key:'data_disk',title:'数据目录占用',scope:'BiliPDJ 数据目录',description:'占用空间，每 60 秒最多扫描一次'},
-  {key:'disk_read',title:'磁盘读取速率',scope:'本项目进程 I/O',description:'进程读取字节数的增量'},
-  {key:'disk_write',title:'磁盘写入速率',scope:'本项目进程 I/O',description:'进程写入字节数的增量'},
-  {key:'network_receive',title:'网络接收速率',scope:'整机/容器接口',description:'包含其他程序的网络流量'},
-  {key:'network_send',title:'网络发送速率',scope:'整机/容器接口',description:'包含其他程序的网络流量'},
-  {key:'gpu',title:'GPU 占用',scope:'本项目 GPU',description:'没有可靠的统一进程级 GPU 占用接口'},
-  {key:'npu',title:'NPU 占用',scope:'本项目 NPU',description:'没有可靠的统一进程级 NPU 占用接口'}
+  {key:'cpu',title:'进程 CPU',scope:'本项目进程',description:'占所有逻辑 CPU 总计算能力的百分比'},
+  {key:'memory',title:'内存占用',scope:'本项目进程',description:'当前进程常驻物理内存；macOS 可能为峰值'},
+  {key:'data_disk',title:'数据目录占用',scope:'Go 数据配置目录',description:'数据配置目录总大小，每 60 秒最多重算一次'},
+  {key:'disk_read',title:'磁盘读取速率',scope:'本项目进程 I/O',description:'当前进程 I/O 读取速率，需要两次采样'},
+  {key:'disk_write',title:'磁盘写入速率',scope:'本项目进程 I/O',description:'当前进程 I/O 写入速率，需要两次采样'},
+  {key:'project_disk',title:'项目文件占用',scope:'程序及发行包文件',description:'当前程序文件与同目录配套资源大小，不含其他软件及用户存档'},
+  {key:'archive_disk',title:'存档占用大小',scope:'Go 排队存档目录',description:'实际 Go 存档目录总大小，包括全部槽位及目录内其他存档文件'}
  ];
  const perfSliderPosition=computed(()=>{
   const s=perfInterval.value;

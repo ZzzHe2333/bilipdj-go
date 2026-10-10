@@ -10,7 +10,7 @@ import (
 )
 
 func TestPerformanceEndpointRequiresAdmin(t *testing.T) {
- a:=New(t.TempDir(),"0.10.3","org/demo")
+ a:=New(t.TempDir(),"0.10.4","org/demo")
  h:=a.Routes(http.NotFoundHandler())
  get:=func(remote,token string)*httptest.ResponseRecorder{
   t.Helper()
@@ -29,6 +29,15 @@ func TestPerformanceEndpointRequiresAdmin(t *testing.T) {
  if w.Header().Get("Cache-Control")!="no-store"{t.Fatal("metrics must not be cached")}
  var result perf.Snapshot
  if err:=json.Unmarshal(w.Body.Bytes(),&result);err!=nil{t.Fatal(err)}
- if result.At.IsZero()||result.NPU.Available {t.Fatalf("unexpected payload: %+v",result)}
+ if result.At.IsZero(){t.Fatalf("timestamp missing: %+v",result)}
+ var fields map[string]json.RawMessage
+ if err:=json.Unmarshal(w.Body.Bytes(),&fields);err!=nil{t.Fatal(err)}
+ if len(fields)!=8 {t.Fatalf("expected 7 metrics plus timestamp, got %v",fields)}
+ for _,k:=range []string{"cpu","memory","data_disk","disk_read","disk_write","project_disk","archive_disk"}{
+  if _,ok:=fields[k];!ok{t.Fatalf("missing performance metric %q",k)}
+ }
+ for _,k:=range []string{"system_cpu","network_receive","network_send","gpu","npu"}{
+  if _,ok:=fields[k];ok{t.Fatalf("removed system metric still exposed: %q",k)}
+ }
  if local:=get("127.0.0.1:12345","");local.Code!=200{t.Fatalf("loopback should remain allowed: %d",local.Code)}
 }

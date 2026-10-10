@@ -246,6 +246,8 @@ func (a *App) SetStoragePlan(plan storage.Plan) error {
 	if err := a.configureLocalQueue(plan); err != nil {
 		return err
 	}
+	// Use the resolved Go archive directory, not the config directory or Python's slots.
+	a.performance.SetArchiveDir(plan.ArchiveDir)
 	a.loadWebAppearanceFiles()
 	return nil
 }
