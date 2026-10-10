@@ -52,7 +52,7 @@
  <div v-if="perfError&&perfInterval>0" class="notice error">性能数据读取失败：{{perfError}}</div>
  <section class="perf-grid" aria-label="性能指标">
   <article v-for="item in perfCards" :key="item.key" class="panel perf-card">
-   <header><strong>{{item.title}}</strong><span class="perf-availability" :class="perfData?.[item.key]?.available?'available':'unavailable'">{{perfInterval===0?'已停止':perfData?.[item.key]?.available?'有数据':'不可用'}}</span></header>
+   <header><strong>{{item.title}}</strong><span class="perf-availability" :class="perfData?.[item.key]?.available?'available':'unavailable'">{{perfInterval===0?'已停止':perfData?.[item.key]?.available?'有数据':!perfData?'等待采样':perfData?.[item.key]?.note?.includes('基线')?'建立基线':'不可用'}}</span></header>
    <div class="perf-value" :class="{dimmed:perfInterval===0||!perfData?.[item.key]?.available}">{{perfInterval===0?'—':formatPerfValue(perfData?.[item.key])}}</div>
    <p class="perf-scope">{{perfData?.[item.key]?.scope||item.scope}}</p>
    <p class="tip">{{perfInterval===0?'监测已关闭，不再采集读数':perfData?.[item.key]?.note||item.description}}</p>
