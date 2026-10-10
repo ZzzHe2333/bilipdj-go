@@ -80,6 +80,16 @@
 
 <template v-else-if="page==='settings'">
  <div class="page-title"><div><p class="eyebrow">PLATFORM CONFIGURATION</p><h1>平台与弹幕规则</h1><p class="muted">按需添加多个平台，监听共享当前存档队列。</p></div></div>
+ <section class="panel rules autostart-panel" aria-label="开机自启设置">
+  <div><h2>开机自启</h2><p class="tip">默认关闭。开启后，当前用户登录 Windows / Linux 桌面 / macOS 时自动运行 BiliPDJ-Go；Windows 也可通过右下角托盘图标右键切换。</p></div>
+  <div class="autostart-actions">
+   <label class="check"><input type="checkbox" :checked="!!autostart.enabled" :disabled="autostartLoading||autostartBusy||!autostart.supported" @change="setAutostart($event.target.checked)" aria-label="开机自启"> 登录系统后自动启动</label>
+   <button type="button" class="btn small" :disabled="autostartBusy||autostartLoading" @click="loadAutostart">刷新状态</button>
+   <span class="tip" role="status">{{autostartLoading?'读取中…':autostartBusy?'正在更新…':!autostart.supported?'当前运行环境不支持':autostart.enabled?'已开启':'已关闭'}}</span>
+  </div>
+  <p v-if="autostartError" class="tip autostart-error" role="alert">{{autostartError}}</p>
+  <p class="tip">{{autostart.note||'仅当前用户生效；Docker 请使用容器重启策略。'}}</p>
+ </section>
  <section class="panel channel-toolbar"><div><h2>直播平台</h2><p class="tip">默认隐藏未添加的平台。点击「＋ 添加平台」增加配置；保存后才会连接或停止监听。</p></div>
   <div class="channel-add"><button class="btn primary" type="button" @click="showPlatformPicker=!showPlatformPicker" :aria-expanded="showPlatformPicker">＋ 添加平台</button>
    <div v-if="showPlatformPicker" class="channel-picker"><button v-for="p in addablePlatforms" :key="p.id" @click="addPlatform(p.id)" type="button">{{p.name}} <small>{{p.supported?'弹幕监听可用':'占位预留'}}</small></button><p v-if="!addablePlatforms.length" class="tip">所有平台已添加</p></div>
