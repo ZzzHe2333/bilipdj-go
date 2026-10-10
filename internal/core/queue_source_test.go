@@ -59,7 +59,7 @@ func TestQueueEditRejectsInvalidManualSourceAndNameWithoutMutation(t *testing.T)
  a.queue=[]QueueItem{{Key:"manual:123",Platform:"manual",Username:"成员",Note:"原备注"}}
  h:=a.Routes(http.NotFoundHandler())
  for _,update:=range []map[string]any{
-  {"action":"edit","key":"manual:123","note":"新备注","source_platform":"untrusted"},
+  {"action":"edit","key":"manual:123","note":"新备注","new_name":"意外修改","source_platform":"untrusted"},
   {"action":"edit","key":"manual:123","note":"新备注","new_name":" "},
  } {
   raw,_:=json.Marshal(update)

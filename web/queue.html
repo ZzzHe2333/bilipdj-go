@@ -61,7 +61,7 @@
      <table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>
      <tbody>
       <tr v-for="q in visibleQueue" :key="q.key" tabindex="0" role="button" :aria-selected="selectedKey===q.key" :class="{chosen:selectedKey===q.key}" @click="selectItem(q.key)" @keydown.enter.prevent="selectItem(q.key)" @keydown.space.prevent="selectItem(q.key)">
-       <td><b>{{position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
+       <td><b>{{position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
       </tr><tr v-if="!visibleQueue.length"><td colspan="6" class="empty">暂无符合条件的成员</td></tr>
      </tbody></table>
     </div>
@@ -70,7 +70,7 @@
       <button type="button" class="member-card" :class="{chosen:selectedKey===q.key}" :aria-pressed="selectedKey===q.key" @click="selectItem(q.key)">
        <span class="member-rank">#{{position(q.key)}}</span>
        <span class="member-info"><strong>{{q.username}}</strong><span>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'暂无备注'}}</span><small>ID：{{q.user_id||'—'}} · {{timeOf(q.at)}}</small></span>
-       <span class="source" :class="q.platform">{{queueSourceLabel(q)}}</span>
+       <span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span>
       </button>
       <div v-if="selectedKey===q.key" class="member-shortcuts">
        <button class="btn small" type="button" @click="moveSelected(-1)" :disabled="busy||selectedIndex<=0">上移</button>
