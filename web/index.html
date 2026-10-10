@@ -4,6 +4,7 @@
 <div class="side-label">运行中心</div>
 <button :class="['nav',{selected:page==='logs'}]" @click="page='logs'"><span>▤</span> 运行日志</button>
 <button :class="['nav',{selected:page==='queue'}]" @click="page='queue'"><span>☷</span> 排队管理 <small class="nav-count">{{queue.length}}</small></button>
+<button :class="['nav',{selected:page==='performance'}]" @click="page='performance'"><span>◫</span> 性能监测</button>
 <div class="side-label side-section">系统设置</div>
 <button :class="['nav',{selected:page==='settings'}]" @click="page='settings'"><span>⚙</span> 平台与规则</button>
 <button :class="['nav',{selected:page==='permissions'}]" @click="page='permissions'"><span>♙</span> 权限管理</button>
@@ -11,7 +12,7 @@
 <button :class="['nav',{selected:page==='storage'}]" @click="page='storage';loadStorage()"><span>▥</span> 数据与存档</button>
 <button :class="['nav',{selected:page==='update'}]" @click="page='update'"><span>↻</span> 软件更新</button>
 <div class="sidebar-bottom"><button type="button" class="wizard-reopen" @click="openWizard">新手配置引导 ↗</button><span class="dot" :class="streamReady?'online':'offline'"></span> {{streamReady?'实时事件流已连接':'事件流连接中'}}<p>v{{status.version || '0.1.0'}} · Go + Vue 3</p></div></aside>
-<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',storage:'数据与存档',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/index" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
+<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',performance:'性能监测',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',storage:'数据与存档',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/index" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
 <main>
 <div v-if="notice" class="notice" :class="noticeLevel">{{notice}} <button @click="notice=''">×</button></div>
 <template v-if="page==='logs'">
@@ -29,6 +30,41 @@
    <div class="log-list" ref="logListRef" role="log" aria-label="实时日志" aria-live="off"><div v-for="entry in filteredLogs" :key="entry.id" class="log-line" :class="'level-'+entry.level.toLowerCase()"><time>{{dateTime(entry.time)}}</time><span class="log-level">{{entry.level}}</span><span class="log-category">{{logCategoryName(entry.category)}}</span><span class="log-message">{{entry.message}}</span></div><div v-if="filteredLogs.length===0" class="empty">暂无符合条件的日志。可检查监听设置或调整筛选条件。</div></div>
   </section>
   <section class="panel log-footer-panel"><strong>快速操作</strong><p class="tip">日志实时更新，B站与抖音状态统一展示。排队编辑请进入左侧「排队管理」，登录 Cookie 与票据不会写入日志。</p><div class="quick-actions"><button class="btn small" @click="page='queue'">查看排队列表 →</button><button class="btn small" @click="page='settings'">打开平台配置 →</button></div></section>
+</template>
+<template v-else-if="page==='performance'">
+ <div class="page-title perf-page-title"><div><p class="eyebrow">APPLICATION TELEMETRY</p><h1>运行性能检测</h1>
+  <p class="muted">本项目进程 CPU / 内存 / 磁盘读写及数据目录占用，另标注整机 CPU、网络流量和 NPU 支持情况。</p></div>
+  <span class="pill" :class="perfInterval>0?'active':'inactive'">{{perfInterval>0?'监测中 · '+perfInterval+' 秒':'已关闭检测'}}</span>
+ </div>
+ <section class="panel perf-controls">
+  <div class="perf-control-header"><div><h2>采样间隔</h2><p class="tip">默认 2 秒；设为 0 完全停止检测。切换到其他页面或浏览器标签隐藏时自动暂停。</p></div>
+   <button type="button" class="btn" @click="setPerfInterval(perfInterval===0?2:0)">{{perfInterval===0?'开启检测（2 秒）':'关闭检测'}}</button>
+  </div>
+  <div class="perf-inputs">
+   <div class="perf-slider-wrap">
+    <input type="range" min="0" max="300" step="1" :value="perfSliderPosition" @input="setPerfSlider($event.target.value)" aria-label="非线性采样间隔滑杆 0 至 1200 秒">
+    <div class="perf-ticks" aria-hidden="true"><span>0 · 关闭</span><span>12 秒</span><span>120 秒</span><span>1200 秒</span></div>
+   </div>
+   <label class="perf-interval-input">精确输入（秒）<input type="number" min="0" max="1200" step="1" :value="perfInterval" @change="setPerfInterval($event.target.value)" @keydown.enter="$event.target.blur()"></label>
+  </div>
+  <p class="tip">不等距刻度：0–12 秒为精细区间、12–120 秒为中等区间、120–1200 秒为长间隔区间；亦可直接输入 1–1200 秒。采样参数只保存在此浏览器中。</p>
+ </section>
+ <div v-if="perfError&&perfInterval>0" class="notice error">性能数据读取失败：{{perfError}}</div>
+ <section class="perf-grid" aria-label="性能指标">
+  <article v-for="item in perfCards" :key="item.key" class="panel perf-card">
+   <header><strong>{{item.title}}</strong><span class="perf-availability" :class="perfData?.[item.key]?.available?'available':'unavailable'">{{perfInterval===0?'已停止':perfData?.[item.key]?.available?'有数据':!perfData?'等待采样':perfData?.[item.key]?.note?.includes('基线')?'建立基线':'不可用'}}</span></header>
+   <div class="perf-value" :class="{dimmed:perfInterval===0||!perfData?.[item.key]?.available}">{{perfInterval===0?'—':formatPerfValue(perfData?.[item.key])}}</div>
+   <p class="perf-scope">{{perfData?.[item.key]?.scope||item.scope}}</p>
+   <p class="tip">{{perfInterval===0?'监测已关闭，不再采集读数':perfData?.[item.key]?.note||item.description}}</p>
+  </article>
+ </section>
+ <section class="panel perf-info">
+  <div><strong>采样状态</strong><p>{{perfInterval===0?'检测已停止，无后台性能采样请求':perfLoading?'正在采集…':perfData?.at?'上次采样：'+perfTime(perfData.at):'等待首个样本（速率类指标需要两次采样）'}}</p></div>
+  <button class="btn small" type="button" :disabled="perfInterval===0||perfLoading" @click="refreshPerfNow">立即检测</button>
+ </section>
+ <section class="panel log-footer-panel"><strong>指标含义及局限</strong>
+  <p class="tip">CPU 进程占用按所有逻辑处理器归一化，整机 CPU 单独展示；内存以进程 RSS/工作集为准，macOS 可能只有峰值 RSS。数据目录占用最多每 60 秒扫描一次；磁盘读写为字节速率，Windows 进程 I/O 可能包含缓存或其他设备 I/O。网络为整机/容器网络接口，不是本项目独占用量。NPU/GPU 未接入可信的跨平台进程级计数器时显示不可用，不等于 0%。关闭检测后既不轮询接口，也不后台刷新。</p>
+ </section>
 </template>
 <template v-else-if="page==='queue'">
   <div class="page-title"><div><p class="eyebrow">QUEUE MANAGEMENT</p><h1>当前排队管理</h1><p class="muted">参照 Python Windows 版队列表格，支持选中操作和 10 个存档槽位。</p></div><div class="title-actions"><a class="btn small" href="/queue.html" target="_blank" rel="noopener noreferrer" title="在新窗口打开适配手机的独立排队管理页">独立管理页 ↗</a><button class="btn" @click="refresh">刷新队列</button></div></div>

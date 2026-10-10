@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ZzzHe2333/bilipdj-go/internal/live"
+	"github.com/ZzzHe2333/bilipdj-go/internal/perf"
 	"github.com/ZzzHe2333/bilipdj-go/internal/storage"
 	"github.com/ZzzHe2333/bilipdj-go/internal/update"
 	"log"
@@ -140,6 +141,7 @@ type App struct {
 	repo                string
 	updater             *update.Service
 	updateMu            sync.Mutex
+	performance         *perf.Monitor
 	preparedUpdate      update.Downloaded
 	installAction       func(update.Downloaded) error
 	qrMu                sync.Mutex
@@ -156,6 +158,7 @@ func (a *App) SetInstallAction(f func(update.Downloaded) error) { a.installActio
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
+	a.performance = perf.New(dataDir)
 	a.qrGenerateURL = biliQRGenerateEndpoint
 	a.qrPollURL = biliQRPollEndpoint
 	a.qrNavURL = biliNavEndpoint
@@ -528,6 +531,16 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		send(w, 200, map[string]any{"status": "ok", "version": a.version})
+	})
+	// Only the active performance page polls this endpoint; there is no
+	// background sampling when the user switches pages or selects interval 0.
+	mux.HandleFunc("GET /api/performance", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		send(w, 200, a.performance.Sample())
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
