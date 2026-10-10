@@ -43,6 +43,7 @@ type counters struct {
  DiskReadBytes uint64
  DiskWriteBytes uint64
  DiskAvailable bool
+ DiskNote string
 }
 
 type machineCounters struct {
@@ -115,8 +116,8 @@ func (m *Monitor) Sample() Snapshot {
     out.CPU=value(math.Min(100,pct),"%","本项目进程","占所有逻辑 CPU 总计算能力的百分比")
    }
    if processErr==nil&&c.DiskAvailable&&m.prev.DiskAvailable {
-    if c.DiskReadBytes>=m.prev.DiskReadBytes {out.DiskRead=value(float64(c.DiskReadBytes-m.prev.DiskReadBytes)/elapsed,"B/s","本项目进程磁盘读取","磁盘实际读取字节（非缓存命中）")}
-    if c.DiskWriteBytes>=m.prev.DiskWriteBytes {out.DiskWrite=value(float64(c.DiskWriteBytes-m.prev.DiskWriteBytes)/elapsed,"B/s","本项目进程磁盘写入","磁盘实际写入字节")}
+    if c.DiskReadBytes>=m.prev.DiskReadBytes {out.DiskRead=value(float64(c.DiskReadBytes-m.prev.DiskReadBytes)/elapsed,"B/s","本项目进程 I/O 读取",c.DiskNote)}
+    if c.DiskWriteBytes>=m.prev.DiskWriteBytes {out.DiskWrite=value(float64(c.DiskWriteBytes-m.prev.DiskWriteBytes)/elapsed,"B/s","本项目进程 I/O 写入",c.DiskNote)}
    }
    if host.CPUAvailable&&m.prevMachine.CPUAvailable&&host.CPUTotal>m.prevMachine.CPUTotal&&host.CPUBusy>=m.prevMachine.CPUBusy {
     out.SystemCPU=value(100*float64(host.CPUBusy-m.prevMachine.CPUBusy)/float64(host.CPUTotal-m.prevMachine.CPUTotal),"%","整机 CPU","包含其他进程")
