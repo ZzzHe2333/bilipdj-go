@@ -72,6 +72,12 @@
        <span class="member-info"><strong>{{q.username}}</strong><span>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'暂无备注'}}</span><small>ID：{{q.user_id||'—'}} · {{timeOf(q.at)}}</small></span>
        <span class="source" :class="q.platform">{{platformName(q.platform)}}</span>
       </button>
+      <div v-if="selectedKey===q.key" class="member-shortcuts">
+       <button class="btn small" type="button" @click="moveSelected(-1)" :disabled="busy||selectedIndex<=0">上移</button>
+       <button class="btn small" type="button" @click="moveSelected(1)" :disabled="busy||selectedIndex>=queue.length-1">下移</button>
+       <button class="btn small" type="button" @click="startEditing" :disabled="busy">修改备注</button>
+       <button class="btn small" type="button" @click="removeSelected" :disabled="busy">删除</button>
+      </div>
      </li><li class="mobile-empty" v-if="!visibleQueue.length">暂无符合条件的成员</li>
     </ol>
     <section class="selection-area" aria-label="选中成员操作">

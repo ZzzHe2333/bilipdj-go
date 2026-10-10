@@ -29,6 +29,7 @@ jobs:
         shell: bash
         run: |
           node --check web/app.js
+          node --check web/queue-standalone.js
           python3 - <<'PY'
           from pathlib import Path
           content = Path('web/overlay.html').read_text(encoding='utf-8')

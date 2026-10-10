@@ -106,3 +106,11 @@
 }
 @media(max-width:360px){.member-card{gap:6px;padding:10px}.member-rank{min-width:31px}.header-actions{gap:5px}.queue-page .summary-metric{padding:8px 5px}}
 @media(prefers-reduced-motion:reduce){.member-card{transition:none}}
+
+/* Mobile inline actions keep selected members accessible in long queues. */
+.member-shortcuts{display:none}
+@media(max-width:720px){
+ .member-shortcuts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:8px 0 2px}
+ .member-shortcuts .btn{min-height:43px;font-size:12px;padding:8px 2px;white-space:normal}
+}
+@media(max-width:360px){.member-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
