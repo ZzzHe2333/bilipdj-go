@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+ <meta name="theme-color" content="#101a2a">
+ <title>BiliPDJ Go · 独立排队管理</title>
+ <link rel="stylesheet" href="/style.css">
+ <link rel="stylesheet" href="/queue-standalone.css">
+</head>
+<body class="queue-page">
+<div id="app" v-cloak>
+ <div class="queue-shell">
+  <header class="queue-page-header">
+   <div class="queue-page-brand"><div class="logo">B</div><div><p class="eyebrow">BILIPDJ GO · QUEUE</p><h1>独立排队管理</h1><p class="tip">与主控制台、直播弹幕及 OBS 实时共用队列</p></div></div>
+   <nav class="header-actions" aria-label="页面操作">
+    <span class="connection" :class="{online:streamReady}">{{streamReady?'实时同步':'轮询同步'}}</span>
+    <a class="btn small" href="/" rel="noopener">返回主控制台</a>
+    <button class="btn small" type="button" @click="needsAuth=!needsAuth">管理授权</button>
+    <button class="btn small" type="button" @click="refresh" :disabled="busy">刷新</button>
+   </nav>
+  </header>
+  <main>
+   <div v-if="notice" class="queue-notice" :class="noticeLevel" role="status" aria-live="polite"><span>{{notice}}</span><button type="button" @click="notice=''" aria-label="关闭提示">×</button></div>
+   <section class="auth-panel panel" v-if="needsAuth" aria-label="助理授权">
+    <div><h2>管理授权</h2><p class="tip">手机或助理设备修改队列需要服务器管理员 Token。令牌仅保存在当前页面内存中，关闭页面即失效；不会放进网址。</p></div>
+    <form class="auth-form" @submit.prevent="saveToken">
+     <label for="admin-token">管理员 Token</label>
+     <input id="admin-token" v-model.trim="tokenInput" type="password" autocomplete="off" placeholder="输入管理员 Token">
+     <button class="btn primary" type="submit" :disabled="!tokenInput">使用令牌</button>
+     <button class="btn" type="button" @click="needsAuth=false">稍后填写</button>
+    </form>
+   </section>
+   <section class="stats" aria-label="排队摘要">
+    <div class="summary-metric"><b>{{queue.length}}</b><span>当前排队</span></div>
+    <div class="summary-metric"><b>{{activeSlot}}</b><span>当前存档</span></div>
+    <div class="summary-metric"><b>{{slotCount}}</b><span>本槽位人数</span></div>
+   </section>
+   <section class="panel queue-main">
+    <div class="queue-toolbar">
+     <label for="slot">排队存档
+      <select id="slot" :value="activeSlot" @change="switchSlot($event)" :disabled="busy">
+       <option v-for="n in 10" :key="n" :value="n">存档 {{n}}（{{slotInfo.slots[n]||0}} 人）</option>
+      </select>
+     </label>
+     <label for="queue-search" class="search-field">筛选用户
+      <input id="queue-search" v-model.trim="search" type="search" placeholder="用户名、备注、平台或用户 ID">
+     </label>
+     <p class="tip">切换槽位会同步影响主控制台和 OBS，不会产生隐藏存档。</p>
+    </div>
+    <form class="add-area" @submit.prevent="addQueue">
+     <label for="new-name">手动添加成员</label>
+     <div class="add-controls">
+      <input id="new-name" v-model.trim="newName" maxlength="60" placeholder="输入新成员用户名" aria-label="输入新成员用户名">
+      <button class="btn primary" type="submit" :disabled="busy||!newName">追加到队尾</button>
+      <button class="btn" type="button" @click="insertQueue" :disabled="busy||!newName">在选中项下方新增</button>
+     </div>
+    </form>
+    <div class="queue-list-title"><h2>排队列表</h2><span class="tip">显示 {{visibleQueue.length}} / {{queue.length}} 人，点击任意成员可选中操作</span></div>
+    <div class="desktop-table">
+     <table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>
+     <tbody>
+      <tr v-for="q in visibleQueue" :key="q.key" tabindex="0" role="button" :aria-selected="selectedKey===q.key" :class="{chosen:selectedKey===q.key}" @click="selectItem(q.key)" @keydown.enter.prevent="selectItem(q.key)" @keydown.space.prevent="selectItem(q.key)">
+       <td><b>{{position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform">{{platformName(q.platform)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
+      </tr><tr v-if="!visibleQueue.length"><td colspan="6" class="empty">暂无符合条件的成员</td></tr>
+     </tbody></table>
+    </div>
+    <ol class="mobile-list" aria-label="队列成员">
+     <li v-for="q in visibleQueue" :key="q.key">
+      <button type="button" class="member-card" :class="{chosen:selectedKey===q.key}" :aria-pressed="selectedKey===q.key" @click="selectItem(q.key)">
+       <span class="member-rank">#{{position(q.key)}}</span>
+       <span class="member-info"><strong>{{q.username}}</strong><span>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'暂无备注'}}</span><small>ID：{{q.user_id||'—'}} · {{timeOf(q.at)}}</small></span>
+       <span class="source" :class="q.platform">{{platformName(q.platform)}}</span>
+      </button>
+     </li><li class="mobile-empty" v-if="!visibleQueue.length">暂无符合条件的成员</li>
+    </ol>
+    <section class="selection-area" aria-label="选中成员操作">
+     <p class="selected-status">{{selectedItem?'已选中：'+selectedItem.username+'（第 '+(selectedIndex+1)+' 位）':'未选中成员，可点击列表选择'}}</p>
+     <div class="queue-actions">
+      <button class="btn" type="button" @click="moveSelected(-1)" :disabled="busy||selectedIndex<=0">上移</button>
+      <button class="btn" type="button" @click="moveSelected(1)" :disabled="busy||selectedIndex<0||selectedIndex>=queue.length-1">下移</button>
+      <button class="btn" type="button" @click="startEditing" :disabled="busy||selectedIndex<0">修改内容</button>
+      <button class="btn" type="button" @click="removeSelected" :disabled="busy||selectedIndex<0">删除选中</button>
+      <button class="btn" type="button" @click="completeFirst" :disabled="busy||!queue.length">完成首位</button>
+      <button class="btn danger-btn" type="button" @click="clearQueue" :disabled="busy||!queue.length">清空当前槽位</button>
+     </div>
+     <form v-if="editing&&selectedItem" class="edit-area" @submit.prevent="saveEdit">
+      <label for="edit-note">修改 {{selectedItem.username}} 的备注 / 内容</label>
+      <textarea id="edit-note" v-model="editNote" rows="3" maxlength="1000" placeholder="排队内容或类别备注"></textarea>
+      <div class="edit-buttons"><button class="btn primary" type="submit" :disabled="busy">保存修改</button><button class="btn" type="button" @click="editing=false">取消</button></div>
+     </form>
+    </section>
+   </section>
+   <p class="queue-footnote">手机端支持触控操作。所有按钮直接操作 BiliPDJ-Go 当前队列；更改会同步到主界面和直播排队展示。请勿直接将管理端口开放到公网。</p>
+  </main>
+ </div>
+</div>
+<script src="/vue.global.js"></script>
+<script src="/queue-standalone.js"></script>
+</body></html>

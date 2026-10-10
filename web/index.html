@@ -31,7 +31,7 @@
   <section class="panel log-footer-panel"><strong>快速操作</strong><p class="tip">日志实时更新，B站与抖音状态统一展示。排队编辑请进入左侧「排队管理」，登录 Cookie 与票据不会写入日志。</p><div class="quick-actions"><button class="btn small" @click="page='queue'">查看排队列表 →</button><button class="btn small" @click="page='settings'">打开平台配置 →</button></div></section>
 </template>
 <template v-else-if="page==='queue'">
-  <div class="page-title"><div><p class="eyebrow">QUEUE MANAGEMENT</p><h1>当前排队管理</h1><p class="muted">参照 Python Windows 版队列表格，支持选中操作和 10 个存档槽位。</p></div><button class="btn" @click="refresh">刷新队列</button></div>
+  <div class="page-title"><div><p class="eyebrow">QUEUE MANAGEMENT</p><h1>当前排队管理</h1><p class="muted">参照 Python Windows 版队列表格，支持选中操作和 10 个存档槽位。</p></div><div class="title-actions"><a class="btn small" href="/queue.html" target="_blank" rel="noopener noreferrer" title="在新窗口打开适配手机的独立排队管理页">独立管理页 ↗</a><button class="btn" @click="refresh">刷新队列</button></div></div>
   <div class="queue-summary"><span class="summary-metric"><b>{{queue.length}}</b> 当前排队</span><span class="summary-metric"><b>{{selectedSlot}}</b> 当前槽位</span><span class="summary-metric"><b>{{connectedCount}} / {{enabledMonitorCount}}</b> 在线平台</span></div>
   <section class="panel queue-manager"><div class="queue-manager-bar"><label>排队存档 <select v-model.number="selectedSlot" @change="changeSlot"><option v-for="n in 10" :key="n" :value="n">存档 {{n}}（{{slotInfo.slots[n]||0}} 人）</option></select></label><label class="search-label">筛选用户 <input v-model.trim="queueSearch" placeholder="用户名、备注或平台"></label><span class="tip">所有平台共享所选槽位，切换前将自动保存当前队列。</span></div>
    <div class="queue-table-wrap"><table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>

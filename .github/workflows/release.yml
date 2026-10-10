@@ -1,7 +1,5 @@
 name: Build and Release
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       publish:
@@ -9,8 +7,8 @@ on:
         type: boolean
         required: true
         default: false
-# On main push and default manual dispatch, build packages but never publish.
-# MCP PR artifacts use the separate mcp-preview.yml pipeline.
+# Build/package jobs run only when explicitly started through Actions.
+# No push or pull-request auto-builds unless the user asks to enable them.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
