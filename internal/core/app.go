@@ -28,6 +28,7 @@ type PlatformConfig struct {
 	Cookie  string `json:"cookie,omitempty"`
 }
 type Config struct {
+	Listeners           []ListenerConfig `json:"listeners,omitempty"`
 	Bilibili            PlatformConfig `json:"bilibili"`
 	Douyin              PlatformConfig `json:"douyin"`
 	Huya                PlatformConfig `json:"huya"`
@@ -134,6 +135,8 @@ type App struct {
 	statuses            map[string]live.Status
 	subscribers         map[chan Event]struct{}
 	workers             map[string]context.CancelFunc
+	listenerGeneration  uint64
+	listenerFactory     func(string) live.Source
 	dataPath            string
 	queuePath           string
 	queueExternal       bool
@@ -388,31 +391,59 @@ func (a *App) Start() {
 	a.logEvent("INFO", "system", "弹幕监听服务已启动")
 }
 func (a *App) apply(cfg Config) {
-	a.mu.Lock()
-	for _, cancel := range a.workers {
-		cancel()
-	}
-	a.workers = map[string]context.CancelFunc{}
-	for _, platform := range []string{"bilibili", "douyin"} {
-		var pc PlatformConfig
-		var source live.Source
-		if platform == "bilibili" {
-			pc = cfg.Bilibili
-			source = live.Bilibili{}
-		} else {
-			pc = cfg.Douyin
-			source = live.Douyin{}
-		}
-		if pc.Enabled && strings.TrimSpace(pc.Room) != "" {
-			ctx, cancel := context.WithCancel(context.Background())
-			a.workers[platform] = cancel
-			go source.Run(ctx, pc.Room, pc.Cookie, a.OnDanmu, a.publishStatus)
-		} else {
-			a.statuses[platform] = live.Status{Platform: platform, Connected: false, Message: "未启用", Since: time.Now()}
-			a.appendLogLocked("INFO", platform, "监听未启用")
-		}
-	}
-	a.mu.Unlock()
+ a.mu.Lock()
+ for _,cancel:=range a.workers{cancel()}
+ a.workers=map[string]context.CancelFunc{}
+ a.statuses=map[string]live.Status{}
+ a.listenerGeneration++
+ generation:=a.listenerGeneration
+ for _,pc:=range configuredListeners(cfg){
+  id:=pc.ID
+  if !pc.Enabled||strings.TrimSpace(pc.Room)==""{
+   a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Connected:false,Message:"未启用",Since:time.Now()}
+   continue
+  }
+  var source live.Source
+  if a.listenerFactory!=nil{source=a.listenerFactory(pc.Platform)}
+  if source==nil{
+   if pc.Platform=="bilibili"{source=live.Bilibili{}}else{source=live.Douyin{}}
+  }
+  ctx,cancel:=context.WithCancel(context.Background())
+  a.workers[id]=cancel
+  a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Message:"正在连接 "+pc.Room,Since:time.Now()}
+  room,cookie,platform:=pc.Room,pc.Cookie,pc.Platform
+  go source.Run(ctx,room,cookie,
+   func(e live.Event){
+    if ctx.Err()!=nil{return}
+    a.mu.RLock()
+    current:=a.listenerGeneration==generation
+    a.mu.RUnlock()
+    if !current{return}
+    e.InstanceID=id
+    e.Platform=platform // preserve unified queue identity by true platform
+    a.OnDanmu(e)
+   },
+   func(s live.Status){
+    if ctx.Err()!=nil{return}
+    s.Platform=platform
+    s.InstanceID=id
+    a.publishInstanceStatus(s,generation)
+   },
+  )
+ }
+ a.mu.Unlock()
+}
+
+func (a *App) publishInstanceStatus(s live.Status,generation uint64) {
+ a.mu.Lock()
+ defer a.mu.Unlock()
+ if a.listenerGeneration!=generation{return}
+ prior,ok:=a.statuses[s.InstanceID]
+ a.statuses[s.InstanceID]=s
+ if !ok||prior.Connected!=s.Connected||prior.Message!=s.Message {
+  a.appendLogLocked("INFO",s.Platform,fmt.Sprintf("[%s] %s",s.InstanceID,s.Message))
+ }
+ a.publishLocked(Event{Type:"status",Data:s})
 }
 func (a *App) Stop() {
 	a.mu.Lock()
@@ -421,6 +452,7 @@ func (a *App) Stop() {
 		stop()
 	}
 	a.workers = map[string]context.CancelFunc{}
+	a.listenerGeneration++
 }
 func send(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -515,6 +547,7 @@ func cleanConfig(c Config) (Config, error) {
 			return c, e
 		}
 	}
+	if err:=validateRoomListeners(&c);err!=nil{return c,err}
 	return c, nil
 }
 func (a *App) isAdmin(r *http.Request) bool {
@@ -706,19 +739,20 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		if a.config.Douyin.Enabled {
 			active = append(active, "douyin")
 		}
+        for _,room:=range a.config.Listeners{if room.Enabled{active=append(active,room.ID)}}
 		send(w, 200, map[string]any{"active": active})
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
-		c := a.config
+		c := redactExtraCookies(a.config)
 		c.Bilibili.Cookie = ""
 		c.Douyin.Cookie = ""
 		c.Huya.Cookie = ""
 		c.WechatMP.Cookie = ""
 		c.Kuaishou.Cookie = ""
 		c.Douyu.Cookie = ""
-		send(w, 200, map[string]any{"config": c, "cookie_configured": map[string]bool{"bilibili": a.config.Bilibili.Cookie != "", "douyin": a.config.Douyin.Cookie != ""}})
+		send(w, 200, map[string]any{"config": c, "cookie_configured": map[string]bool{"bilibili": a.config.Bilibili.Cookie != "", "douyin": a.config.Douyin.Cookie != ""}, "listener_cookies": extraCookieConfigured(a.config)})
 	})
 	mux.HandleFunc("POST /api/config", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
@@ -737,6 +771,13 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		if cfg.Douyin.Cookie == "" {
 			cfg.Douyin.Cookie = a.config.Douyin.Cookie
 		}
+        // Credential preservation uses immutable instance IDs, not array indices.
+        // Removed IDs do not inherit or leak any old Cookie.
+        byID:=make(map[string]string,len(a.config.Listeners))
+        for _,old:=range a.config.Listeners{byID[old.ID]=old.Cookie}
+        for i:=range cfg.Listeners {
+          if cfg.Listeners[i].Cookie=="" {cfg.Listeners[i].Cookie=byID[cfg.Listeners[i].ID]}
+        }
 		if cfg.Huya.Cookie == "" { cfg.Huya.Cookie = a.config.Huya.Cookie }
 		if cfg.WechatMP.Cookie == "" { cfg.WechatMP.Cookie = a.config.WechatMP.Cookie }
 		if cfg.Kuaishou.Cookie == "" { cfg.Kuaishou.Cookie = a.config.Kuaishou.Cookie }
