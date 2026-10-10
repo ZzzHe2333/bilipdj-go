@@ -267,11 +267,19 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 			send(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
+        var request struct { InstanceID string `json:"instance_id"` }
+        if err:=decode(r,&request);err!=nil{send(w,400,map[string]string{"error":err.Error()});return}
+        requested:=request.InstanceID
+        if requested==""{requested="bilibili"}
 		a.qrMu.Lock()
 		defer a.qrMu.Unlock()
 		key := a.qrSession.Key
         target:=a.qrSession.TargetID
         if target==""{target="bilibili"}
+        if key!=""&&target!=requested{
+         send(w,409,map[string]string{"error":"该二维码已被另一个直播间的扫码任务替换，请重新扫码"})
+         return
+        }
 		if key == "" || time.Now().After(a.qrSession.Expiry) {
 			a.qrSession = biliQRSession{}
 			send(w, 410, map[string]string{"error": "扫码会话已过期，请重新生成"})
