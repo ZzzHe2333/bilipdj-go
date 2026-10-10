@@ -5,3 +5,7 @@
 *.zip
 *.sha256
 .DS_Store
+
+# Windows icon assets and resources generated from committed *.ico.b64 sources
+/assets/*.ico
+/rsrc_windows_*.syso
