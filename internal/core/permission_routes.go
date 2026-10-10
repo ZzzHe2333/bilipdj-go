@@ -14,6 +14,7 @@ func (a *App) permissionRoutes(mux *http.ServeMux){
    {"id":"insert","label":"插队命令"},
    {"id":"switch","label":"排队功能开关"},
    {"id":"limits","label":"修改人数上限"},
+   {"id":"guard_insert","label":"舰长插队资格"},
   }})
  })
  mux.HandleFunc("POST /api/permissions",func(w http.ResponseWriter,r *http.Request){
