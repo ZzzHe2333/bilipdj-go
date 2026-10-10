@@ -855,6 +855,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			SourcePlatform *string `json:"source_platform,omitempty"`
 			Index  int    `json:"index"`
 			Keys []string `json:"keys,omitempty"`
+            Slot int `json:"slot,omitempty"`
 			Before []string `json:"before,omitempty"`
 		}
 		if e := decode(r, &req); e != nil {
@@ -865,6 +866,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		defer a.mu.Unlock()
 		switch req.Action {
         case "reorder":
+            if req.Slot!=a.config.ArchiveSlot{send(w,409,map[string]string{"error":"当前存档已被切换，取消排序并刷新"});return}
             if len(req.Keys)!=len(a.queue)||len(req.Before)!=len(a.queue){
                 send(w,409,map[string]string{"error":"队列人数已改变，请刷新后重新排序"});return
             }
