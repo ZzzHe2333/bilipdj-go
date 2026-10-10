@@ -220,6 +220,7 @@ go vet ./...
 | 文档 | 内容 |
 | --- | --- |
 | [功能差异审核](./docs/FEATURE_PARITY.md) | 原 Python 版与 Go 版的支持差异和未验证部分 |
+| [多直播间和多 B站 Cookie](./docs/MULTI_ROOM.md) | 同平台多实例、独立 Cookie、扫码和共享存档 |
 | [用户数据与迁移](./docs/USER_DATA_COMPAT.md) | Windows / Linux / macOS 数据目录、Python/Go 隔离 |
 | [更新器说明](./docs/UPDATER.md) | 公益加速节点、进度、历史版本、回滚 |
 | [性能监测](./docs/PERFORMANCE.md) | 固定七项监测、项目文件及 Go 存档空间统计口径、采样设置 |
