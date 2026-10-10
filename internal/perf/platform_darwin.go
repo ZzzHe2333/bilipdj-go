@@ -22,4 +22,3 @@ func readProcess()(c counters,err error){
  }
  return c,nil
 }
-func readMachine() machineCounters {return machineCounters{}}
