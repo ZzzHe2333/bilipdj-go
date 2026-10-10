@@ -75,7 +75,7 @@ jobs:
             base64 --decode assets/bilipdj-go-tray.ico.b64 > assets/bilipdj-go-tray.ico
             # Resource objects are scoped to the current Windows architecture.
             # The other OS builds do not require go-winres or Windows SDKs.
-            go run github.com/tc-hib/go-winres@v0.3.3 simply \
+            GOOS=linux GOARCH=amd64 go run github.com/tc-hib/go-winres@v0.3.3 simply \
               --arch "$GOARCH" --out rsrc \
               --manifest gui --icon assets/bilipdj-go.ico \
               --product-name "BiliPDJ Go" \
