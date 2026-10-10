@@ -396,42 +396,56 @@ func (a *App) apply(cfg Config) {
  a.workers=map[string]context.CancelFunc{}
  a.statuses=map[string]live.Status{}
  a.listenerGeneration++
- generation:=a.listenerGeneration
- for _,pc:=range configuredListeners(cfg){
-  id:=pc.ID
-  if !pc.Enabled||strings.TrimSpace(pc.Room)==""{
-   a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Connected:false,Message:"未启用",Since:time.Now()}
-   continue
-  }
-  var source live.Source
-  if a.listenerFactory!=nil{source=a.listenerFactory(pc.Platform)}
-  if source==nil{
-   if pc.Platform=="bilibili"{source=live.Bilibili{}}else{source=live.Douyin{}}
-  }
-  ctx,cancel:=context.WithCancel(context.Background())
-  a.workers[id]=cancel
-  a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Message:"正在连接",Since:time.Now()}
-  room,cookie,platform:=pc.Room,pc.Cookie,pc.Platform
-  go source.Run(ctx,room,cookie,
-   func(e live.Event){
-    if ctx.Err()!=nil{return}
-    a.mu.RLock()
-    current:=a.listenerGeneration==generation
-    a.mu.RUnlock()
-    if !current{return}
-    e.InstanceID=id
-    e.Platform=platform // preserve unified queue identity by true platform
-    a.OnDanmu(e)
-   },
-   func(s live.Status){
-    if ctx.Err()!=nil{return}
-    s.Platform=platform
-    s.InstanceID=id
-    a.publishInstanceStatus(s,generation)
-   },
-  )
- }
+ for _,pc:=range configuredListeners(cfg){a.startListenerLocked(pc,a.listenerGeneration)}
  a.mu.Unlock()
+}
+
+// All calls hold a.mu. This helper can replace a single room without
+// resetting the other live streams during targeted QR login / logout.
+func (a *App) startListenerLocked(pc ListenerConfig,generation uint64) {
+ id:=pc.ID
+ if !pc.Enabled||strings.TrimSpace(pc.Room)=="" {
+  a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Connected:false,Message:"未启用",Since:time.Now()}
+  return
+ }
+ var source live.Source
+ if a.listenerFactory!=nil{source=a.listenerFactory(pc.Platform)}
+ if source==nil{if pc.Platform=="bilibili"{source=live.Bilibili{}}else{source=live.Douyin{}}}
+ ctx,cancel:=context.WithCancel(context.Background())
+ a.workers[id]=cancel
+ a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Message:"正在连接",Since:time.Now()}
+ room,cookie,platform:=pc.Room,pc.Cookie,pc.Platform
+ go source.Run(ctx,room,cookie,
+  func(e live.Event){
+   if ctx.Err()!=nil{return}
+   a.mu.RLock()
+   current:=a.listenerGeneration==generation
+   a.mu.RUnlock()
+   if !current||ctx.Err()!=nil{return}
+   e.InstanceID=id
+   e.Platform=platform
+   a.OnDanmu(e) // all room instances share the original queue/archive
+  },
+  func(s live.Status){
+   if ctx.Err()!=nil{return}
+   s.Platform=platform
+   s.InstanceID=id
+   a.publishInstanceStatus(s,generation)
+  },
+ )
+}
+
+// QR login/logout should not disrupt unrelated room connections. The
+// canceled worker's callbacks consult its canceled context before reporting.
+func (a *App) refreshListener(id string) {
+ a.mu.Lock()
+ defer a.mu.Unlock()
+ if stop:=a.workers[id];stop!=nil{stop();delete(a.workers,id)}
+ if p,ok:=a.config.listener(id);ok{
+  a.startListenerLocked(p,a.listenerGeneration)
+ }else{
+  delete(a.statuses,id)
+ }
 }
 
 func (a *App) publishInstanceStatus(s live.Status,generation uint64) {
@@ -772,6 +786,11 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		if cfg.Douyin.Cookie == "" {
 			cfg.Douyin.Cookie = a.config.Douyin.Cookie
 		}
+        // Older API clients do not send "listeners"; absent is different
+        // from an explicitly empty list submitted by the updated Web UI.
+        if cfg.Listeners==nil&&len(a.config.Listeners)>0 {
+          cfg.Listeners=append([]ListenerConfig{},a.config.Listeners...)
+        }
         // Credential preservation uses immutable instance IDs, not array indices.
         // Removed IDs do not inherit or leak any old Cookie.
         byID:=make(map[string]string,len(a.config.Listeners))
