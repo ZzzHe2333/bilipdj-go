@@ -23,6 +23,7 @@ const (
 )
 
 type biliQRSession struct {
+	TargetID string
 	Key    string
 	Expiry time.Time
 }
@@ -231,10 +232,19 @@ func (a *App) completeBiliQRCookie(ctx context.Context, rawURL string, poll *htt
 
 func (a *App) qrRoutes(mux *http.ServeMux) {
 	start := func(w http.ResponseWriter, r *http.Request) {
-		if !a.isAdmin(r) {
-			send(w, 403, map[string]string{"error": "forbidden"})
-			return
-		}
+        if !a.isAdmin(r) { send(w,403,map[string]string{"error":"forbidden"});return }
+        target:="bilibili"
+        if r.Method==http.MethodPost {
+          var body struct{ InstanceID string `json:"instance_id"` }
+          if e:=decode(r,&body);e!=nil {send(w,400,map[string]string{"error":e.Error()});return}
+          if body.InstanceID!=""{target=body.InstanceID}
+        }
+        a.mu.RLock()
+        item,exists:=a.config.listener(target)
+        a.mu.RUnlock()
+        if !exists||item.Platform!="bilibili"{
+          send(w,400,map[string]string{"error":"请先保存该 B站直播间实例后再扫码"});return
+        }
 		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		var resp biliQRResponse
@@ -247,7 +257,7 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 			return
 		}
 		a.qrMu.Lock()
-		a.qrSession = biliQRSession{Key: resp.Data.QRCodeKey, Expiry: time.Now().Add(4 * time.Minute)}
+		a.qrSession = biliQRSession{TargetID:target,Key: resp.Data.QRCodeKey, Expiry: time.Now().Add(4 * time.Minute)}
 		a.qrMu.Unlock()
 		send(w, 200, map[string]any{"status": "waiting", "url": resp.Data.URL, "expires_in": 240})
 	}
@@ -261,6 +271,8 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 		a.qrMu.Lock()
 		defer a.qrMu.Unlock()
 		key := a.qrSession.Key
+        target:=a.qrSession.TargetID
+        if target==""{target="bilibili"}
 		if key == "" || time.Now().After(a.qrSession.Expiry) {
 			a.qrSession = biliQRSession{}
 			send(w, 410, map[string]string{"error": "扫码会话已过期，请重新生成"})
@@ -306,63 +318,68 @@ func (a *App) qrRoutes(mux *http.ServeMux) {
 			send(w, 502, map[string]string{"error": "B站扫码已确认，但登录状态验证失败；未保存会话"})
 			return
 		}
-		a.mu.Lock()
-		before := a.config.Bilibili.Cookie
-		a.config.Bilibili.Cookie = cookie
-		e = a.saveLocked()
-		if e != nil {
-			a.config.Bilibili.Cookie = before
-		}
-		cfg := a.config.Bilibili
-		a.mu.Unlock()
-		if e != nil {
-			send(w, 500, map[string]string{"error": "本地保存登录状态失败"})
-			return
-		}
-		a.qrSession = biliQRSession{}
-		if cfg.Enabled {
-			a.restartBilibili(cfg)
-		}
+        a.mu.Lock()
+        before:=a.config
+        candidate:=a.config
+        candidate.Listeners=append([]ListenerConfig(nil),before.Listeners...)
+        e=candidate.assignBiliCookie(target,cookie)
+        if e==nil{e=validateRoomListeners(&candidate)}
+        if e!=nil{
+          a.mu.Unlock()
+          send(w,409,map[string]string{"error":"账号 Cookie 冲突或房间失效："+e.Error()})
+          return
+        }
+        a.config=candidate
+        e=a.saveLocked()
+        if e!=nil{a.config=before}
+        cfg:=a.config
+        a.mu.Unlock()
+        if e!=nil{send(w,500,map[string]string{"error":"本地保存登录状态失败"});return}
+        a.qrSession=biliQRSession{}
+        item,_:=cfg.listener(target)
+        if item.Enabled {a.apply(cfg)}
 		send(w, 200, map[string]any{"status": "success", "uid": nav.Data.Mid, "username": nav.Data.Uname, "message": "B站扫码登录成功，已安全保存会话"})
 	})
-	mux.HandleFunc("POST /api/bili/logout", func(w http.ResponseWriter, r *http.Request) {
-		if !a.isAdmin(r) {
-			send(w, 403, map[string]string{"error": "forbidden"})
-			return
-		}
-		a.qrMu.Lock()
-		a.qrSession = biliQRSession{}
-		a.qrMu.Unlock()
-		a.mu.Lock()
-		before := a.config.Bilibili.Cookie
-		a.config.Bilibili.Cookie = ""
-		e := a.saveLocked()
-		if e != nil {
-			a.config.Bilibili.Cookie = before
-		}
-		cfg := a.config.Bilibili
-		a.mu.Unlock()
-		if e != nil {
-			send(w, 500, map[string]string{"error": "保存失败"})
-			return
-		}
-		if cfg.Enabled {
-			a.restartBilibili(cfg)
-		}
-		send(w, 200, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("POST /api/bili/logout", func(w http.ResponseWriter,r *http.Request){
+ if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
+ var req struct{InstanceID string `json:"instance_id"`}
+ if err:=decode(r,&req);err!=nil{send(w,400,map[string]string{"error":err.Error()});return}
+ id:=req.InstanceID
+ if id==""{id="bilibili"}
+ a.qrMu.Lock()
+ if a.qrSession.TargetID==id{a.qrSession=biliQRSession{}}
+ a.qrMu.Unlock()
+ a.mu.Lock()
+ before:=a.config
+ updated:=before
+ updated.Listeners=append([]ListenerConfig(nil),before.Listeners...)
+ if err:=updated.assignBiliCookie(id,"");err!=nil{
+  a.mu.Unlock()
+  send(w,404,map[string]string{"error":err.Error()});return
+ }
+ // An enabled room without a credential cannot remain active when multiple
+ // Bilibili rooms are configured; logging out disables only that room.
+ if id=="bilibili"{updated.Bilibili.Enabled=false}else{
+  for i:=range updated.Listeners{
+   if updated.Listeners[i].ID==id{updated.Listeners[i].Enabled=false}
+  }
+ }
+ a.config=updated
+ err:=a.saveLocked()
+ if err!=nil{a.config=before}
+ a.mu.Unlock()
+ if err!=nil{send(w,500,map[string]string{"error":"保存失败"});return}
+ a.apply(updated)
+ send(w,200,map[string]string{"status":"ok"})
+})
+
 }
 
-func (a *App) restartBilibili(pc PlatformConfig) {
-	a.mu.Lock()
-	if stop := a.workers["bilibili"]; stop != nil {
-		stop()
-		delete(a.workers, "bilibili")
-	}
-	if pc.Enabled && pc.Room != "" {
-		ctx, cancel := context.WithCancel(context.Background())
-		a.workers["bilibili"] = cancel
-		go (live.Bilibili{}).Run(ctx, pc.Room, pc.Cookie, a.OnDanmu, a.publishStatus)
-	}
-	a.mu.Unlock()
+// Legacy call-site compatibility; reconfigure connections from the complete
+// multi-room state, rather than replacing a platform-wide singleton worker.
+func (a *App) restartBilibili(_ PlatformConfig) {
+ a.mu.RLock()
+ cfg:=a.config
+ a.mu.RUnlock()
+ a.apply(cfg)
 }
