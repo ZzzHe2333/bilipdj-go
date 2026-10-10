@@ -190,3 +190,6 @@
 .permission-capabilities{display:flex;gap:10px;flex-wrap:wrap}
 .permission-capabilities label{font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
 @media(max-width:700px){.obs-floating-preview{width:min(360px,calc(100vw - 8px))}.permission-table{font-size:12px}.permission-table th,.permission-table td{padding:7px 4px}}
+
+.settings-grid.channel-tabs-grid,.settings-grid.multi-room-grid{grid-template-columns:minmax(0,1fr)!important;max-width:100%}
+.settings-grid.channel-tabs-grid .settings-card,.settings-grid.multi-room-grid .settings-card{max-width:100%;min-width:0}
