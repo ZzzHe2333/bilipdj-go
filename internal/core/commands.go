@@ -142,6 +142,13 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 	operator := a.isOperator(e)
     queuePrivileged:=a.commandAllowed(e,"queue")
 	super := a.isSuperOperator(e)
+ // A super-admin can revoke an administrator's entire insert capability.
+ // Do not re-enable "插队" indirectly via that admin's verified guard/gift
+ // status if this explicit restriction is present.
+ if input=="插队"&&!super {
+  p,ok:=a.config.effectiveEntry(e)
+  if ok&&p.Role=="admin"&&!containsCap(p.Capabilities,"insert"){return false}
+ }
 	if operator {
 		if super {
 			switch {
