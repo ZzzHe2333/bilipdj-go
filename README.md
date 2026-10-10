@@ -13,7 +13,7 @@
 - **旧版 `/ws` WebSocket 只读推送兼容**：推送 `PDJ_STATUS`、`QUEUE_UPDATE`、B站基础 `DANMU_MSG` 与抖音 `DOUYIN_DANMU`；**不允许 WebSocket 客户端执行管理指令**，不宣称所有旧第三方协议完全兼容。
 - **Web UI + OBS**：Vue 3 离线控制台 `http://127.0.0.1:9816/`。OBS 浏览器源兼容 Python Web 版原地址 **`http://127.0.0.1:9816/index`**，并继续支持 Go 版 `http://127.0.0.1:9816/overlay.html`（建议 800×600）。两条路径展示相同的队列、默认完全透明。控制台「OBS 展示设置」支持实时调整字号、透明度、字体和描边并在棋盘格上即时预览；保存后同步到 OBS 浏览器源。
 - **独立排队管理**：在主控制台「排队管理」点击「独立管理页 ↗」，或直接打开 `http://127.0.0.1:9816/queue.html`；独立响应式页面适用于手机、平板和助理触控操作，功能与主页面共用同一套队列 API / SSE / 十个存档，包含搜索、追加、插入、上移、下移、编辑备注、删除、完成首位及清空。不需要启动第二份程序。
-- **应用内自更新（v0.10.0）**：Web「软件更新」提供检查、官方/第三方加速下载、SHA-256 校验、确认安装并自动重启。临时更新助手在主程序退出后备份原 EXE/二进制并替换；新版启动异常时自动回滚。**仅经管理员主动确认触发安装**；Docker 必须重建或拉取镜像。
+- **应用内自更新（v0.10.3）**：Web「软件更新」提供检查、GitHub 官方直连、6 个可单选的第三方公益加速节点及自动失败切换、SHA-256 校验、确认安装并自动重启。临时更新助手在主程序退出后备份原 EXE/二进制并替换；新版启动异常时自动回滚。**仅经管理员主动确认触发安装**；Docker 必须重建或拉取镜像。
 - **内置 MCP（AI 工具接口）**：HTTP `/mcp` 与 `--mcp-stdio` 支持 AI 查询 B站/抖音监听状态、统一队列及 10 个槽位；写操作需独立 `BILIPDJ_MCP_WRITE_TOKEN`，默认只读。兼容传统和 2026 MCP 协议，详见 [MCP 接入指南](docs/MCP.md)。
 - **Docker / 原生运行**：无需 Python、Node 或外网前端 CDN。
 
@@ -93,7 +93,7 @@ Docker 映射端口到**宿主机** `127.0.0.1:9816`，容器内监听 `0.0.0.0`
 
 ## 版本更新 / 自动打包
 
-GitHub Actions `.github/workflows/release.yml` 在主分支推送或推送 `v*` 标签时编译 Windows / Linux / macOS（AMD64 + ARM64 可用组合），上传 `bilipdj-go-<goos>-<goarch>.zip` 与同名 `.sha256`。软件支持从 `releases/latest` 检查更新。v0.10.0 起 Release 还提供 `update-manifest.json`（六平台 ZIP 的 SHA-256 和大小），当 GitHub API 不可达时，通过可选 GH-Proxy 第三方加速代理获取清单并下载附件。详见 [自更新安全与使用说明](docs/UPDATER.md)。
+GitHub Actions `.github/workflows/release.yml` 默认仅在用户明确要求时手动触发，编译 Windows / Linux / macOS（AMD64 + ARM64 可用组合），上传 `bilipdj-go-<goos>-<goarch>.zip` 与同名 `.sha256`。软件支持从 `releases/latest` 检查更新。v0.10.0 起 Release 还提供 `update-manifest.json`（六平台 ZIP 的 SHA-256 和大小），当 GitHub API 不可达时，通过可选 GH-Proxy 第三方加速代理获取清单并下载附件。 支持的代理包括 gh-proxy.com、gh-proxy.org、github.akams.cn、ghfile.geekertao.top、github.dpik.top、gh.dpik.top；这些都是第三方服务，不提供发行者签名认证。详见 [自更新安全与使用说明](docs/UPDATER.md)。
 
 **保护数据：** Go 版使用当前生效用户数据目录下的 `state.json`。在「平台配置 → 导入旧版配置」选择旧版 `config.yaml` 或含有多个旧版配置文件的 ZIP，可先预览，再确认导入。旧版原件永不被修改；导入时会在 `data/migration-backup/` 保存当前新版状态与旧版原始文件（0600 权限），避免数据不可逆丢失。保存过的 Python/JS 插件不会被执行。
 

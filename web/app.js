@@ -109,7 +109,7 @@ createApp({setup(){
  async function addQueue(){if(!newName.value)return;await queueAction({action:'add',name:newName.value});newName.value=''}
  function removeQueue(key){queueAction({action:'remove',key})}
  function clearQueue(){if(window.confirm('确认清空当前全部排队？'))queueAction({action:'clear'})}
- async function checkUpdate(){busy.value=true;updateReady.value=null;try{release.value=await api('/api/update?source='+encodeURIComponent(updateSource.value));message('更新检查完成（'+(release.value.source==='accelerated'?'加速线路':'官方线路')+'）','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
+ async function checkUpdate(){busy.value=true;updateReady.value=null;try{release.value=await api('/api/update?source='+encodeURIComponent(updateSource.value));message('更新检查完成（'+({official:'GitHub 官方',accelerated:'自动加速池',akams:'github.akams.cn',ghfile:'ghfile.geekertao.top','github-dpik':'github.dpik.top','gh-dpik':'gh.dpik.top','gh-proxy-com':'GH-Proxy.com','gh-proxy-org':'GH-Proxy.org'}[release.value.source]||'代理线路')+'）','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
  async function downloadUpdate(){busy.value=true;try{const r=await api('/api/update/download',{method:'POST',body:JSON.stringify({source:updateSource.value})});updateReady.value=r;message('已下载且 SHA-256 校验通过，可安装并重启','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
  async function installUpdate(){if(!updateReady.value)return;
   if(!window.confirm('确认安装 '+updateReady.value.version+' 并重启 BiliPDJ Go？\n安装将短暂中断直播监听。旧版程序会保留备份。'))return;

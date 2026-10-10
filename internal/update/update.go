@@ -19,11 +19,48 @@ import (
 	"time"
 )
 
-// GitHub is always attempted first. The third-party proxy is only a transport
-// option for fixed, repository-scoped URLs. It is NOT a cryptographic signer.
-const ProxyPrefix = "https://gh-proxy.com/"
-const ProxyAlternate = "https://gh-proxy.org/"
-const maxPackage = 250 << 20
+// Proxy endpoints forward only fixed GitHub Release URLs from this repo.
+// These community nodes are untrusted transport, NOT a cryptographic signer.
+// Keep the historical constants for existing clients and tests.
+const (
+ ProxyPrefix = "https://gh-proxy.com/"
+ ProxyAlternate = "https://gh-proxy.org/"
+ ProxyAkams = "https://github.akams.cn/"
+ ProxyGHFile = "https://ghfile.geekertao.top/"
+ ProxyGitHubDPik = "https://github.dpik.top/"
+ ProxyGHDPik = "https://gh.dpik.top/"
+ maxPackage = 250 << 20
+)
+
+type proxyEndpoint struct { name, prefix string }
+
+var communityProxies = []proxyEndpoint{
+ {"gh-proxy-com", ProxyPrefix},
+ {"gh-proxy-org", ProxyAlternate},
+ {"akams", ProxyAkams},
+ {"ghfile", ProxyGHFile},
+ {"github-dpik", ProxyGitHubDPik},
+ {"gh-dpik", ProxyGHDPik},
+}
+
+// Automatic and accelerated modes try every predefined node; choosing a
+// specific service limits routing to only that provider.
+func proxiesForSource(source string) []proxyEndpoint {
+ if source == "auto" || source == "accelerated" { return communityProxies }
+ for _, p := range communityProxies { if p.name == source { return []proxyEndpoint{p} } }
+ return nil
+}
+func validUpdateSource(source string) bool {
+ return source == "auto" || source == "official" || source == "accelerated" || len(proxiesForSource(source)) == 1
+}
+func sourceCandidates(u, source string, apiOverride bool) []string {
+ if apiOverride || source == "official" { return []string{u} }
+ candidates := make([]string, 0, len(communityProxies)+1)
+ if source == "auto" { candidates = append(candidates, u) }
+ for _, p := range proxiesForSource(source) { candidates = append(candidates, p.prefix+u) }
+ if source == "accelerated" { candidates = append(candidates, u) }
+ return candidates
+}
 
 type Release struct {
 	Version         string `json:"version"`
@@ -128,47 +165,44 @@ func validateRepo(r string) bool {
 func (s *Service) releaseAssetURL(tag, name string) string {
 	return "https://github.com/" + s.Repo + "/releases/download/" + url.PathEscape(tag) + "/" + url.PathEscape(name)
 }
-func (s *Service) fromManifest(ctx context.Context) (ghRelease, error) {
-	var manifest releaseManifest
-	var last error
-	loaded := false
-	for _, proxy := range []string{ProxyPrefix, ProxyAlternate} {
-		c, cancel := context.WithTimeout(ctx, 11*time.Second)
-		err := s.fetchJSON(c, proxy+s.manifestURL(), &manifest)
-		cancel()
-		if err == nil {
-			loaded = true
-			break
-		}
-		last = err
-	}
-	if !loaded {
-		return ghRelease{}, fmt.Errorf("GitHub 代理更新清单不可用：%w", last)
-	}
-	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(manifest.Tag) || "v"+manifest.Version != manifest.Tag {
-		return ghRelease{}, errors.New("加速更新清单版本号不合法")
-	}
-	r := ghRelease{Tag: manifest.Tag, Body: manifest.Notes, Source: "accelerated"}
-	for name, item := range manifest.Packages {
-		if !regexp.MustCompile(`^bilipdj-go-(windows|linux|darwin)-(amd64|arm64)\.zip$`).MatchString(name) || item.Name != name || item.Size < 1 || item.Size > maxPackage || !validHash(item.SHA) {
-			continue
-		}
-		r.Assets = append(r.Assets, ghAsset{Name: name, URL: s.releaseAssetURL(r.Tag, name), Size: item.Size, SHA: strings.ToLower(item.SHA)})
-	}
-	return r, nil
+func (s *Service) fromManifest(ctx context.Context, source string) (ghRelease, error) {
+ var last error
+ for _, proxy := range proxiesForSource(source) {
+  var manifest releaseManifest
+  c, cancel := context.WithTimeout(ctx, 4*time.Second)
+  err := s.fetchJSON(c, proxy.prefix+s.manifestURL(), &manifest)
+  cancel()
+  if err != nil { last = err; continue }
+  if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(manifest.Tag) || "v"+manifest.Version != manifest.Tag {
+   last = errors.New("加速更新清单版本号不合法")
+   continue
+  }
+  r := ghRelease{Tag: manifest.Tag, Body: manifest.Notes, Source: "accelerated"}
+  if source != "auto" && source != "accelerated" { r.Source = source }
+  for name, item := range manifest.Packages {
+   if !regexp.MustCompile(`^bilipdj-go-(windows|linux|darwin)-(amd64|arm64)\.zip$`).MatchString(name) ||
+      item.Name != name || item.Size < 1 || item.Size > maxPackage || !validHash(item.SHA) { continue }
+   r.Assets = append(r.Assets, ghAsset{Name:name, URL:s.releaseAssetURL(r.Tag,name), Size:item.Size, SHA:strings.ToLower(item.SHA)})
+  }
+  if len(r.Assets) == 0 { last=errors.New("加速更新清单没有有效下载包"); continue }
+  return r, nil
+ }
+ if last == nil { last=errors.New("没有可用的公益加速节点") }
+ return ghRelease{}, fmt.Errorf("GitHub 代理更新清单不可用：%w", last)
 }
+
 func (s *Service) latest(ctx context.Context, source string) (ghRelease, ghAsset, ghAsset, error) {
 	if !validateRepo(s.Repo) {
 		return ghRelease{}, ghAsset{}, ghAsset{}, errors.New("无效 GitHub 仓库名")
 	}
-	if source != "auto" && source != "official" && source != "accelerated" {
-		return ghRelease{}, ghAsset{}, ghAsset{}, errors.New("无效的下载线路")
-	}
+	if !validUpdateSource(source) {
+  return ghRelease{}, ghAsset{}, ghAsset{}, errors.New("无效的下载线路")
+ }
 	var r ghRelease
 	var err error
-	if source == "accelerated" && s.APIBase == "" {
-		r, err = s.fromManifest(ctx)
-	} else {
+	if source != "auto" && source != "official" && s.APIBase == "" {
+  r, err = s.fromManifest(ctx, source)
+ } else {
 		apiCtx := ctx
 		if source == "auto" && s.APIBase == "" {
 			var cancel context.CancelFunc
@@ -179,7 +213,7 @@ func (s *Service) latest(ctx context.Context, source string) (ghRelease, ghAsset
 		r.Source = "official"
 	}
 	if err != nil && source == "auto" && s.APIBase == "" {
-		r, err = s.fromManifest(ctx)
+		r, err = s.fromManifest(ctx, "auto")
 	}
 	if err != nil {
 		return ghRelease{}, ghAsset{}, ghAsset{}, fmt.Errorf("检查更新失败：%w", err)
@@ -250,33 +284,18 @@ func (s *Service) Check(ctx context.Context, sources ...string) (Release, error)
 	return Release{Version: r.Tag, Current: s.Version, UpdateAvailable: newer(r.Tag, s.Version) && has, Asset: asset.Name, URL: asset.URL, Notes: r.Body, HasSHA256: has, Source: r.Source}, nil
 }
 func (s *Service) downloadCandidate(ctx context.Context, u, source string, max int64) ([]byte, string, error) {
-	candidates := []string{u}
-	if s.APIBase == "" {
-		if source == "accelerated" {
-			candidates = []string{ProxyPrefix + u, ProxyAlternate + u, u}
-		}
-		if source == "auto" {
-			candidates = []string{u, ProxyPrefix + u, ProxyAlternate + u}
-		}
-	}
-	var last error
-	for _, candidate := range candidates {
-		downloadCtx := ctx
-		var cancel context.CancelFunc
-		if len(candidates) > 1 {
-			downloadCtx, cancel = context.WithTimeout(ctx, 13*time.Second)
-		}
-		data, e := s.fetch(downloadCtx, candidate, max)
-		if cancel != nil {
-			cancel()
-		}
-		if e == nil {
-			return data, candidate, nil
-		}
-		last = e
-	}
-	return nil, "", fmt.Errorf("官方及第三方线路均失败：%w", last)
+ candidates := sourceCandidates(u, source, s.APIBase != "")
+ var last error
+ for _, candidate := range candidates {
+  downloadCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+  data, e := s.fetch(downloadCtx, candidate, max)
+  cancel()
+  if e == nil { return data, candidate, nil }
+  last=e
+ }
+ return nil, "", fmt.Errorf("更新校验文件所有所选线路均失败：%w", last)
 }
+
 func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, error) {
 	source := "auto"
 	if len(sources) > 0 && sources[0] != "" {
@@ -322,47 +341,40 @@ func (s *Service) Download(ctx context.Context, sources ...string) (Downloaded, 
 	if e = os.MkdirAll(dir, 0700); e != nil {
 		return Downloaded{}, e
 	}
-	candidates := []string{asset.URL}
-	if s.APIBase == "" {
-		if source == "accelerated" {
-			candidates = []string{ProxyPrefix + asset.URL, ProxyAlternate + asset.URL, asset.URL}
-		} else if source == "auto" {
-			candidates = append(candidates, ProxyPrefix+asset.URL, ProxyAlternate+asset.URL)
-		}
-	}
+	candidates := sourceCandidates(asset.URL, source, s.APIBase != "")
 	var downloadErr error
 	for _, u := range candidates {
-		requestCtx := ctx
-		var cancel context.CancelFunc
-		if source == "auto" && s.APIBase == "" && u == asset.URL {
-			requestCtx, cancel = context.WithTimeout(ctx, 20*time.Second)
-		}
-		if cancel != nil {
-			defer cancel()
-		}
+		// A dead community node must not block all later fallback candidates.
+		limit := 30 * time.Second
+		if source == "auto" && s.APIBase == "" && u == asset.URL { limit = 16 * time.Second }
+		requestCtx, cancel := context.WithTimeout(ctx, limit)
 		req, err := http.NewRequestWithContext(requestCtx, "GET", u, nil)
 		if err != nil {
 			return Downloaded{}, err
 		}
 		req.Header.Set("User-Agent", "bilipdj-go-updater/1.0")
 		resp, err := s.client().Do(req)
-		if err != nil {
-			downloadErr = err
-			continue
-		}
-		if resp.StatusCode != 200 {
-			downloadErr = fmt.Errorf("下载 HTTP %d", resp.StatusCode)
-			resp.Body.Close()
-			continue
-		}
+        if err != nil {
+         cancel()
+         downloadErr = err
+         continue
+        }
+        if resp.StatusCode != 200 {
+         downloadErr = fmt.Errorf("下载 HTTP %d", resp.StatusCode)
+         resp.Body.Close()
+         cancel()
+         continue
+        }
 		tmp, err := os.CreateTemp(dir, ".download-*")
 		if err != nil {
-			resp.Body.Close()
-			return Downloaded{}, err
-		}
+         resp.Body.Close()
+         cancel()
+         return Downloaded{}, err
+        }
 		digest := sha256.New()
 		n, err := io.Copy(io.MultiWriter(tmp, digest), io.LimitReader(resp.Body, maxPackage+1))
 		resp.Body.Close()
+        cancel()
 		closeErr := tmp.Close()
 		if err == nil {
 			err = closeErr
