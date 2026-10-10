@@ -79,3 +79,46 @@
 .obs-url-box input{display:block;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:12px}
 .obs-url-box .quick-actions{margin-top:12px}
 @media(max-width:660px){.obs-preview-stage .obs-preview{height:310px}.obs-size-controls{gap:8px}.obs-preview-toolbar label{width:100%;justify-content:space-between}}
+
+/* BiliPDJ process telemetry dashboard; shared desktop/mobile layout. */
+.perf-page-title{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:15px}
+.perf-controls{padding:clamp(15px,2.5vw,24px);margin-bottom:16px}
+.perf-control-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.perf-control-header h2{font-size:17px;margin:0 0 7px}
+.perf-control-header .tip{margin:0}
+.perf-control-header .btn{min-height:42px}
+.perf-inputs{display:grid;grid-template-columns:minmax(0,1fr) 152px;align-items:end;gap:26px;margin:21px 0}
+.perf-slider-wrap{min-width:0}
+.perf-slider-wrap input[type=range]{display:block;width:100%;margin:0;padding:0;height:29px;accent-color:var(--accent);cursor:pointer;touch-action:pan-y}
+.perf-ticks{display:flex;justify-content:space-between;align-items:flex-start;margin-top:7px;gap:3px;color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
+.perf-ticks span{flex:0 0 auto}.perf-ticks span:nth-child(2),.perf-ticks span:nth-child(3){position:relative}
+.perf-ticks span:nth-child(2){transform:translateX(-12%)}.perf-ticks span:nth-child(3){transform:translateX(13%)}
+.perf-interval-input{display:grid;gap:8px;white-space:nowrap;font-size:12px;color:var(--dim);font-weight:600}
+.perf-interval-input input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:16px}
+.perf-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.perf-card{padding:19px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.perf-card header{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.perf-card header strong{font-weight:750;font-size:14px}
+.perf-availability{font-size:11px;color:var(--dim);border:1px solid var(--line);padding:3px 7px;border-radius:999px;white-space:nowrap}
+.perf-availability.available{color:#71dab2}
+.perf-value{font-size:clamp(22px,2.7vw,30px);line-height:1.25;font-weight:800;font-variant-numeric:tabular-nums;min-height:38px;overflow-wrap:anywhere}
+.perf-value.dimmed{opacity:.65}
+.perf-scope{font-size:12px;color:var(--dim);margin:0}
+.perf-card .tip{min-height:31px;margin:0;line-height:1.5}
+.perf-info{padding:16px 21px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.perf-info strong{font-size:14px}
+.perf-info p{margin:5px 0 0;font-size:12px;color:var(--dim)}
+.perf-info .btn{min-height:41px}
+@media(max-width:1040px){.perf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){
+ .perf-page-title{align-items:flex-start}
+ .perf-grid{grid-template-columns:1fr;gap:9px}
+ .perf-card{padding:15px}
+ .perf-inputs{grid-template-columns:1fr;gap:17px}
+ .perf-interval-input{width:100%}
+ .perf-card .tip{min-height:0}
+ .perf-value{font-size:26px}
+ .perf-controls{padding:15px}
+ .perf-control-header .btn{width:100%}
+ .perf-info{padding:14px}
+}
