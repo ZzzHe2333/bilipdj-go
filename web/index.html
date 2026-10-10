@@ -19,7 +19,7 @@
   <div class="page-title"><div><p class="eyebrow">WINDOWS LOG CONSOLE</p><h1>运行日志</h1><p class="muted">参考 Python Windows 版日志页，实时查看连接、弹幕、排队与系统事件。</p></div>
    <div class="title-actions"><span class="pill" :class="streamReady?'active':'inactive'">{{streamReady?'● 实时连接中':'○ 正在重连'}}</span><button class="btn" @click="refreshLogs">刷新日志</button></div>
   </div>
-  <div class="platform-grid log-status-grid"><article v-for="p in monitorPlatforms" :key="p.id" class="panel platform"><div class="platform-head"><div><span class="platform-icon" :class="p.id">{{p.id==='bilibili'?'B':'抖'}}</span><strong>{{p.name}}</strong></div><span class="pill" :class="statuses[p.id]?.connected?'active':'inactive'">{{statuses[p.id]?.connected?'已连接':'未连接'}}</span></div><p class="platform-room">{{config[p.id]?.room || '尚未设置直播间'}}</p><p class="platform-help">{{statuses[p.id]?.message || '等待连接状态'}}</p></article></div>
+  <div class="platform-grid log-status-grid"><article v-for="p in [...monitorPlatforms,...extraMonitorPlatforms]" :key="p.instanceId||p.id" class="panel platform"><div class="platform-head"><div><span class="platform-icon" :class="p.id">{{p.id==='bilibili'?'B':'抖'}}</span><strong>{{p.name}}</strong></div><span class="pill" :class="statuses[p.instanceId||p.id]?.connected?'active':'inactive'">{{statuses[p.instanceId||p.id]?.connected?'已连接':'未连接'}}</span></div><p class="platform-room">{{p.room||config[p.id]?.room || '尚未设置直播间'}}</p><p class="platform-help">{{statuses[p.instanceId||p.id]?.message || '等待连接状态'}}</p></article></div>
   <section class="panel log-panel"><div class="panel-title"><div><h2>实时运行记录</h2><small>最近最多保留 500 条日志；清空仅清除当前浏览器显示</small></div><span class="counter">{{filteredLogs.length}} / {{logs.length}} 条</span></div>
    <div class="log-toolbar"><label class="search-label"><span>搜索</span><input v-model.trim="logSearch" placeholder="按关键字搜索日志" aria-label="搜索日志"></label>
     <label class="select-label"><span>级别</span><select v-model="logLevel" aria-label="日志级别"><option value="ALL">全部</option><option value="DEBUG">DEBUG</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></label>
@@ -102,7 +102,7 @@
   <template v-if="p.id==='bilibili'"><p class="tip">B站需要先扫码登录再开启监听（已配置匿名监听的旧存档仍可读取）。Cookie 仅存储在本机。</p>
     <p :class="cookieConfigured.bilibili?'support-ok':'support-pending'">{{cookieConfigured.bilibili?'已保存登录信息（可能需要重新验证）':'未登录，请先扫码'}}</p>
     <div class="channel-login"><button type="button" class="btn primary small" :disabled="busy" @click="startQR">B站扫码登录</button><button type="button" class="btn small" :disabled="!cookieConfigured.bilibili" @click="logoutBili">退出登录</button></div>
-    <div v-if="qrImage" class="qr-login"><img :src="qrImage" width="220" height="220" alt="B站扫码登录二维码"><p class="tip">用哔哩哔哩 App 扫码并确认，登录状态自动刷新。</p></div><p v-if="qrState" class="tip">{{qrState}}</p>
+    <div v-if="qrImage&&qrInstanceId==='bilibili'" class="qr-login"><img :src="qrImage" width="220" height="220" alt="B站扫码登录二维码"><p class="tip">用哔哩哔哩 App 扫码并确认，登录状态自动刷新。</p></div><p v-if="qrState" class="tip">{{qrState}}</p>
     <details class="channel-advanced"><summary>高级：手动填写 B站 Cookie</summary><textarea v-model="config.bilibili.cookie" rows="2" :placeholder="cookieConfigured.bilibili?'已保存，留空保留':'手动粘贴 Cookie'"></textarea></details>
   </template>
   <template v-else-if="p.id==='douyin'"><p class="tip">可直接输入数字房间号，或粘贴 live.douyin.com 网址及包含网址的分享文案，自动解析。短链接需先在浏览器展开。</p>
@@ -110,6 +110,57 @@
   </template>
   <p v-else class="tip">{{p.description}}该平台目前仅支持保存配置，不会尝试连接或显示在线状态。</p>
  </article></div>
+
+<div class="panel rules multi-room-toolbar">
+ <h2>更多直播间（同平台可添加多个）</h2>
+ <p class="tip">B站一份 Cookie 只对应一个直播间：新增 B站房间需要使用另一份独立的登录 Cookie。抖音可以同时添加多个房间。保存后，所有房间继续共用当前队列和存档。</p>
+ <div class="channel-head-actions">
+  <button type="button" class="btn small" :disabled="busy||(config.listeners||[]).length>=30" @click="addExtraListener('bilibili')">＋ 添加 B站直播间</button>
+  <button type="button" class="btn small" :disabled="busy||(config.listeners||[]).length>=30" @click="addExtraListener('douyin')">＋ 添加抖音直播间</button>
+ </div>
+ <p class="tip">新增实例先填写直播间并保持关闭，点击保存，然后逐个扫码绑定对应 B站账号；登录成功后开启监听并保存。每个房间都有自己的连接状态。</p>
+</div>
+<div v-if="(config.listeners||[]).length" class="settings-grid multi-room-grid">
+ <article v-for="listener in config.listeners" :key="listener.id" class="panel settings-card">
+  <div class="setting-head">
+   <div><h2>{{listener.platform==='bilibili'?'Bilibili 直播间':'抖音直播间'}}</h2>
+    <small class="support-ok">独立监听 · 共用队列 · {{listener.id}}</small>
+   </div>
+   <div class="channel-head-actions">
+    <label class="switch"><input type="checkbox" v-model="listener.enabled" :aria-label="'启用 '+listener.id"><span class="switch-bg"></span></label>
+    <button type="button" class="btn small" @click="removeExtraListener(listener.id)">移除</button>
+   </div>
+  </div>
+  <label>直播间号或直播链接
+   <input v-model.trim="listener.room" :placeholder="listener.platform==='bilibili'?'B站房间号':'live.douyin.com/xxxx'" autocomplete="off"
+    @blur="listener.platform==='douyin'&&normalizeExtraDouyin(listener)">
+  </label>
+  <p class="tip">连接状态：{{statuses[listener.id]?.connected?'已连接':statuses[listener.id]?.message||'尚未保存或未启用'}}</p>
+  <template v-if="listener.platform==='bilibili'">
+   <p class="tip">每个启用的 B站房间必须使用独立 Cookie。与其他房间重复的 SESSDATA 无法保存，不会自动复用主账号 Cookie。</p>
+   <p :class="listenerCookies[listener.id]?'support-ok':'support-pending'">{{listenerCookies[listener.id]?'已单独保存 Cookie（不回传明文）':'未绑定该直播间 Cookie'}}</p>
+   <div class="channel-login">
+    <button type="button" class="btn primary small" :disabled="busy" @click="startQR(listener.id)">此房间扫码登录</button>
+    <button type="button" class="btn small" :disabled="!listenerCookies[listener.id]||busy" @click="logoutBili(listener.id)">清除本房间登录</button>
+   </div>
+   <div v-if="qrImage&&qrInstanceId===listener.id" class="qr-login">
+    <img :src="qrImage" width="220" height="220" alt="B站该直播间登录二维码">
+    <p class="tip">请用当前房间专属 B站账号扫码，确认后仅保存到该实例。</p>
+   </div>
+   <p v-if="qrInstanceId===listener.id&&qrState" class="tip">{{qrState}}</p>
+   <details class="channel-advanced">
+    <summary>高级：手动填写该房间 B站 Cookie</summary>
+    <textarea v-model="listener.cookie" rows="2" :placeholder="listenerCookies[listener.id]?'留空保留此房间 Cookie':'粘贴该房间专用 Cookie（包含 SESSDATA）'"></textarea>
+   </details>
+  </template>
+  <template v-else>
+   <p class="tip">抖音可独立监听多个房间，通常不需要填写 Cookie。</p>
+   <details class="channel-advanced"><summary>高级：该房间专用 Cookie（可选）</summary>
+    <textarea v-model="listener.cookie" rows="2" :placeholder="listenerCookies[listener.id]?'留空保留该房间 Cookie':'可选 Cookie'"></textarea>
+   </details>
+  </template>
+ </article>
+</div>
 <article class="panel rules"><h2>弹幕处理</h2><label class="check"><input type="checkbox" v-model="config.auto_queue"> 开启自动排队</label><label>排队关键词<input v-model.trim="config.command" maxlength="16" placeholder="排队"></label><div class="switch-grid"><label class="check"><input type="checkbox" v-model="config.switches.paidui"> 总排队开关</label><label class="check"><input type="checkbox" v-model="config.switches.guanfu_paidui"> 官服排队</label><label class="check"><input type="checkbox" v-model="config.switches.bfu_paidui"> B服排队</label><label class="check"><input type="checkbox" v-model="config.switches.chaoji_paidui"> 超级排队</label><label class="check"><input type="checkbox" v-model="config.switches.mifu_paidui"> 米服排队</label><label class="check"><input type="checkbox" v-model="config.switches.quxiao_paidui"> 自助取消</label><label class="check"><input type="checkbox" v-model="config.switches.xiugai_paidui"> 自助修改</label></div><label class="check"><input type="checkbox" v-model="config.switches.jianzhang_chadui"> 舰长插队</label><label>每日排队次数限制（0 为无限制）<input type="number" min="0" max="999" v-model.number="config.daily_queue_limit"></label><label>每日重置时间（本机时区，HH:MM）<input type="time" v-model="config.daily_queue_reset_time"></label><label>最大排队人数（0 为不限制）<input type="number" min="0" max="10000" v-model.number="config.max_queue"></label><label>语言设置<input v-model="config.language" placeholder="中文"></label><p class="tip">当前存档槽位：{{config.archive_slot || 1}}。10 个独立存档槽位可在「排队管理」页切换；支持导入原版存档 ZIP 内的所有槽位。</p><p class="tip">发送关键词，或「关键词 + 空格 + 备注」入队。同平台同用户不能重复入队，手动移除后可重新排队。</p></article><button class="btn primary submit" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存并重新连接'}}</button>
  <article class="panel rules"><h2>礼物排队资格（B站）</h2><p class="tip">默认关闭。只接收 B站直播连接里的 SEND_GIFT；已知礼物目录按电池门槛计算，或按精确礼物名授予资格。此版不支持导入旧版本已消费资格。</p>
 <label class="check"><input type="checkbox" v-model="config.gift_queue.enabled">启用礼物排队资格</label>
