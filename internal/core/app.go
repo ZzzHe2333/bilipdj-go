@@ -410,7 +410,7 @@ func (a *App) apply(cfg Config) {
   }
   ctx,cancel:=context.WithCancel(context.Background())
   a.workers[id]=cancel
-  a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Message:"正在连接 "+pc.Room,Since:time.Now()}
+  a.statuses[id]=live.Status{Platform:pc.Platform,InstanceID:id,Message:"正在连接",Since:time.Now()}
   room,cookie,platform:=pc.Room,pc.Cookie,pc.Platform
   go source.Run(ctx,room,cookie,
    func(e live.Event){
