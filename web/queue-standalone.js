@@ -1,19 +1,23 @@
 /* Standalone queue console. Same REST/SSE and persisted slots as the main console. */
-const {createApp,ref,computed,onMounted,onUnmounted}=Vue;
+const {createApp,ref,computed,onMounted,onUnmounted,nextTick}=Vue;
 createApp({setup(){
  const queue=ref([]),slotInfo=ref({active_slot:1,slots:{}}),activeSlot=ref(1);
  const selectedKey=ref(''),search=ref(''),newName=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false);
  const needsAuth=ref(false),tokenInput=ref(''),adminToken=ref('');
- const editing=ref(false),editNote=ref('');
+ const editing=ref(false),editNote=ref(''),editName=ref(''),editSource=ref('');
+ const editingKey=ref(''),editingSlot=ref(0),editNameInput=ref(null);
  const visibleQueue=computed(()=>{
   const word=search.value.toLowerCase();
-  return queue.value.filter(q=>!word||(String(q.username||'')+' '+String(q.note||'')+' '+String(q.mode||'')+' '+String(q.platform||'')+' '+String(q.user_id||'')).toLowerCase().includes(word));
+  return queue.value.filter(q=>!word||(String(q.username||'')+' '+String(q.note||'')+' '+String(q.mode||'')+' '+String(q.platform||'')+' '+String(q.user_id||'')+' '+String(q.source_platform||'')).toLowerCase().includes(word));
  });
  const selectedIndex=computed(()=>queue.value.findIndex(q=>q.key===selectedKey.value));
  const selectedItem=computed(()=>selectedIndex.value>=0?queue.value[selectedIndex.value]:null);
  const slotCount=computed(()=>Number(slotInfo.value.slots?.[activeSlot.value]??queue.value.length));
- const platformName=p=>({bilibili:'B站',douyin:'抖音',huya:'虎牙',wechat_mp:'公众号',kuaishou:'快手',douyu:'斗鱼',manual:'手动'})[p]||p||'手动';
+ const platformName=p=>({bilibili:'B站',douyin:'抖音',huya:'虎牙',wechat_mp:'微信公众号',kuaishou:'快手',douyu:'斗鱼'})[p]||p||'无来源';
+ const queueSourceLabel=q=>q.platform==='manual' ? platformName(q.source_platform) : platformName(q.platform);
+ const isManual=q=>!!q&&q.platform==='manual'&&/^(manual|admin):/.test(q.key||'');
+ const editingManual=computed(()=>isManual(queue.value.find(q=>q.key===editingKey.value)));
  const timeOf=t=>{if(!t)return '—';const d=new Date(t);return isNaN(d.getTime())?'—':d.toLocaleTimeString('zh-CN',{hour12:false})};
  const position=key=>queue.value.findIndex(q=>q.key===key)+1;
  let events=null,pollTimer=null,readSeq=0;
@@ -31,7 +35,12 @@ createApp({setup(){
   }
   return data;
  }
- function reconcileSelection(){if(selectedKey.value&&!queue.value.some(x=>x.key===selectedKey.value)){selectedKey.value='';editing.value=false;editNote.value='';}}
+ function reconcileSelection(){
+  if(selectedKey.value&&!queue.value.some(x=>x.key===selectedKey.value))selectedKey.value='';
+  if(editing.value&&(activeSlot.value!==editingSlot.value||!queue.value.some(x=>x.key===editingKey.value))){
+   closeEditing();notify('当前成员已被移除或切换了存档，编辑已取消','error');
+  }
+ }
  async function refresh(){
   if(busy.value)return;
   const seq=++readSeq;
@@ -59,8 +68,8 @@ createApp({setup(){
    root.style.colorScheme=mode;
   }catch{}
  }
- function selectItem(key){if(selectedKey.value===key){selectedKey.value='';editing.value=false;return;}
-  selectedKey.value=key;editing.value=false;editNote.value='';
+ function selectItem(key){if(selectedKey.value===key){selectedKey.value='';return;}
+  selectedKey.value=key;
  }
  async function mutate(path,payload){
   if(busy.value)return false;
@@ -70,7 +79,7 @@ createApp({setup(){
    if(path==='/api/queue/slots'){
     queue.value=Array.isArray(data.entries)?data.entries:[];
     slotInfo.value=data;activeSlot.value=data.active_slot||1;
-    selectedKey.value='';editing.value=false;
+    selectedKey.value='';closeEditing();
    }else{
     queue.value=Array.isArray(data)?data:[];
     reconcileSelection();
@@ -97,9 +106,27 @@ createApp({setup(){
   const index=selectedIndex.value+delta;if(index<0||index>=queue.value.length)return;
   await mutate('/api/queue',{action:'move',key:selectedKey.value,index});
  }
- function startEditing(){if(!selectedItem.value)return;editNote.value=selectedItem.value.note||'';editing.value=true;}
- async function saveEdit(){if(!selectedItem.value)return;
-  if(await mutate('/api/queue',{action:'edit',key:selectedItem.value.key,note:editNote.value}))editing.value=false;
+ function closeEditing(){if(busy.value)return;editing.value=false;editingKey.value='';editingSlot.value=0;}
+ async function startEditing(){
+  const item=selectedItem.value;if(!item)return;
+  editingKey.value=item.key;editingSlot.value=activeSlot.value;
+  editName.value=item.username||'';editNote.value=item.note||'';
+  editSource.value=item.platform==='manual'?(item.source_platform||''):item.platform;
+  editing.value=true;
+  await nextTick();
+  editNameInput.value?.focus();
+ }
+ async function saveEdit(){
+  if(!editing.value||busy.value)return;
+  if(editingSlot.value!==activeSlot.value){closeEditing();notify('存档已切换，请重新选择成员','error');return;}
+  const current=queue.value.find(q=>q.key===editingKey.value);
+  if(!current){closeEditing();notify('成员已不存在，请刷新后重试','error');return;}
+  const payload={action:'edit',key:editingKey.value,note:editNote.value};
+  if(isManual(current)){
+   payload.new_name=editName.value.trim();payload.source_platform=editSource.value;
+  }
+  const ok=await mutate('/api/queue',payload);
+  if(ok)closeEditing();
  }
  async function removeSelected(){if(!selectedItem.value)return;
   const user=selectedItem.value;if(window.confirm('确认从当前槽位删除「'+user.username+'」？')){
@@ -112,15 +139,16 @@ createApp({setup(){
  async function clearQueue(){if(!queue.value.length)return;
   if(window.confirm('确认清空槽位 '+activeSlot.value+' 的全部 '+queue.value.length+' 人？此操作不可撤销。'))await mutate('/api/queue',{action:'clear'});
  }
+ function keyHandler(event){if(event.key==='Escape'&&editing.value&&!busy.value){closeEditing();}}
  function connectSSE(){
   events=new EventSource('/api/events');
   events.onopen=()=>streamReady.value=true;
   events.onerror=()=>streamReady.value=false;
   events.onmessage=e=>{try{const msg=JSON.parse(e.data);if(msg.type==='queue')void refresh();}catch{}};
  }
- onMounted(()=>{void loadAppearance();void refresh();connectSSE();pollTimer=setInterval(refresh,8000);});
- onUnmounted(()=>{events?.close();clearInterval(pollTimer);});
+ onMounted(()=>{void loadAppearance();void refresh();connectSSE();pollTimer=setInterval(refresh,8000);window.addEventListener('keydown',keyHandler);});
+ onUnmounted(()=>{events?.close();clearInterval(pollTimer);window.removeEventListener('keydown',keyHandler);});
  return {queue,slotInfo,activeSlot,selectedKey,selectedIndex,selectedItem,slotCount,visibleQueue,search,newName,notice,noticeLevel,
-  busy,streamReady,needsAuth,tokenInput,saveToken,editing,editNote,position,platformName,timeOf,
+  busy,streamReady,needsAuth,tokenInput,saveToken,editing,editNote,editName,editSource,editNameInput,editingManual,closeEditing,position,platformName,queueSourceLabel,timeOf,
   refresh,selectItem,switchSlot,addQueue,insertQueue,moveSelected,startEditing,saveEdit,removeSelected,completeFirst,clearQueue};
 }}).mount('#app');

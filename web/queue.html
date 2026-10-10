@@ -61,7 +61,7 @@
      <table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>
      <tbody>
       <tr v-for="q in visibleQueue" :key="q.key" tabindex="0" role="button" :aria-selected="selectedKey===q.key" :class="{chosen:selectedKey===q.key}" @click="selectItem(q.key)" @keydown.enter.prevent="selectItem(q.key)" @keydown.space.prevent="selectItem(q.key)">
-       <td><b>{{position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform">{{platformName(q.platform)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
+       <td><b>{{position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
       </tr><tr v-if="!visibleQueue.length"><td colspan="6" class="empty">暂无符合条件的成员</td></tr>
      </tbody></table>
     </div>
@@ -70,12 +70,12 @@
       <button type="button" class="member-card" :class="{chosen:selectedKey===q.key}" :aria-pressed="selectedKey===q.key" @click="selectItem(q.key)">
        <span class="member-rank">#{{position(q.key)}}</span>
        <span class="member-info"><strong>{{q.username}}</strong><span>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'暂无备注'}}</span><small>ID：{{q.user_id||'—'}} · {{timeOf(q.at)}}</small></span>
-       <span class="source" :class="q.platform">{{platformName(q.platform)}}</span>
+       <span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span>
       </button>
       <div v-if="selectedKey===q.key" class="member-shortcuts">
        <button class="btn small" type="button" @click="moveSelected(-1)" :disabled="busy||selectedIndex<=0">上移</button>
        <button class="btn small" type="button" @click="moveSelected(1)" :disabled="busy||selectedIndex>=queue.length-1">下移</button>
-       <button class="btn small" type="button" @click="startEditing" :disabled="busy">修改备注</button>
+       <button class="btn small" type="button" @click="startEditing" :disabled="busy">修改信息</button>
        <button class="btn small" type="button" @click="removeSelected" :disabled="busy">删除</button>
       </div>
      </li><li class="mobile-empty" v-if="!visibleQueue.length">暂无符合条件的成员</li>
@@ -90,15 +90,33 @@
       <button class="btn" type="button" @click="completeFirst" :disabled="busy||!queue.length">完成首位</button>
       <button class="btn danger-btn" type="button" @click="clearQueue" :disabled="busy||!queue.length">清空当前槽位</button>
      </div>
-     <form v-if="editing&&selectedItem" class="edit-area" @submit.prevent="saveEdit">
-      <label for="edit-note">修改 {{selectedItem.username}} 的备注 / 内容</label>
-      <textarea id="edit-note" v-model="editNote" rows="3" maxlength="1000" placeholder="排队内容或类别备注"></textarea>
-      <div class="edit-buttons"><button class="btn primary" type="submit" :disabled="busy">保存修改</button><button class="btn" type="button" @click="editing=false">取消</button></div>
-     </form>
+
     </section>
    </section>
    <p class="queue-footnote">手机端支持触控操作。所有按钮直接操作 BiliPDJ-Go 当前队列；更改会同步到主界面和直播排队展示。请勿直接将管理端口开放到公网。</p>
   </main>
+
+   <div v-if="editing" class="queue-dialog-backdrop" @click.self="closeEditing" role="presentation">
+    <section class="queue-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="queue-edit-title" aria-describedby="queue-edit-help" @keydown.esc.stop.prevent="closeEditing">
+     <header class="queue-edit-header"><div><p class="eyebrow">EDIT QUEUE MEMBER</p><h2 id="queue-edit-title">修改排队成员</h2></div><button type="button" class="dialog-close" @click="closeEditing" aria-label="关闭编辑窗口">×</button></header>
+     <p class="tip" id="queue-edit-help">修改会同步到主控制台、OBS 和当前队列存档。</p>
+     <form class="queue-edit-form" @submit.prevent="saveEdit">
+      <label for="edit-name">用户名<input ref="editNameInput" id="edit-name" v-model="editName" maxlength="60" :readonly="!editingManual" :disabled="busy" autocomplete="off"></label>
+      <p v-if="!editingManual" class="tip">弹幕加入的成员使用直播平台认证身份，仅可修改排队备注。</p>
+      <label for="edit-note">排队内容 / 备注<textarea id="edit-note" v-model="editNote" rows="3" maxlength="1000" placeholder="输入排队内容或备注" :disabled="busy"></textarea></label>
+      <label for="edit-source">来源平台
+       <select id="edit-source" v-model="editSource" :disabled="busy||!editingManual">
+        <option value="">无来源</option>
+        <option value="bilibili">B站</option><option value="douyin">抖音</option>
+        <option value="huya">虎牙</option><option value="kuaishou">快手</option>
+        <option value="douyu">斗鱼</option><option value="wechat_mp">微信公众号</option>
+       </select>
+      </label>
+      <p class="tip">手动选择来源仅用于展示，不会伪造该平台的用户身份或启动弹幕监听。</p>
+      <div class="queue-dialog-actions"><button type="button" class="btn" @click="closeEditing" :disabled="busy">取消</button><button class="btn primary" type="submit" :disabled="busy||!editName.trim()">保存修改</button></div>
+     </form>
+    </section>
+   </div>
  </div>
 </div>
 <script src="/vue.global.js"></script>
