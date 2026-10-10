@@ -3,13 +3,27 @@ const {createApp,ref,computed,onMounted,onUnmounted,nextTick}=Vue;
 createApp({setup(){
  const queue=ref([]),slotInfo=ref({active_slot:1,slots:{}}),activeSlot=ref(1);
  const selectedKey=ref(''),search=ref(''),newName=ref('');
+ const sorting=ref(false),sortBefore=ref([]),sortKeys=ref([]),dragging=ref('');
+ const sortedQueue=computed(()=>sorting.value?sortKeys.value.map(k=>queue.value.find(q=>q.key===k)).filter(Boolean):queue.value);
+ function beginSorting(){if(busy.value)return;search.value='';sortBefore.value=queue.value.map(q=>q.key);sortKeys.value=[...sortBefore.value];sorting.value=true}
+ function cancelSorting(){sorting.value=false;sortBefore.value=[];sortKeys.value=[];dragging.value=''}
+ function dragStart(event,key){if(!sorting.value)return;dragging.value=key;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',key)}
+ function dragOver(event){if(sorting.value)event.preventDefault()}
+ function dragDrop(event,target){if(!sorting.value)return;event.preventDefault();const a=sortKeys.value.indexOf(dragging.value),b=sortKeys.value.indexOf(target);if(a<0||b<0||a===b)return;const next=[...sortKeys.value];next.splice(b,0,next.splice(a,1)[0]);sortKeys.value=next}
+ async function saveSorting(){
+  if(!sorting.value||busy.value)return;busy.value=true;++readSeq;
+  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value})});
+   cancelSorting();notify('排队排序已保存并同步','success')
+  }catch(e){notify('排序未保存：'+e.message,'error');cancelSorting()}
+  finally{busy.value=false;void refresh()}
+ }
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false);
  const needsAuth=ref(false),tokenInput=ref(''),adminToken=ref('');
  const editing=ref(false),editNote=ref(''),editName=ref(''),editSource=ref('');
  const editingKey=ref(''),editingSlot=ref(0),editNameInput=ref(null);
  const visibleQueue=computed(()=>{
   const word=search.value.toLowerCase();
-  return queue.value.filter(q=>!word||(String(q.username||'')+' '+String(q.note||'')+' '+String(q.mode||'')+' '+String(q.platform||'')+' '+String(q.user_id||'')+' '+String(q.source_platform||'')).toLowerCase().includes(word));
+  return sortedQueue.value.filter(q=>!word||(String(q.username||'')+' '+String(q.note||'')+' '+String(q.mode||'')+' '+String(q.platform||'')+' '+String(q.user_id||'')+' '+String(q.source_platform||'')).toLowerCase().includes(word));
  });
  const selectedIndex=computed(()=>queue.value.findIndex(q=>q.key===selectedKey.value));
  const selectedItem=computed(()=>selectedIndex.value>=0?queue.value[selectedIndex.value]:null);
@@ -90,7 +104,7 @@ createApp({setup(){
   finally{busy.value=false;void refresh();}
  }
  async function switchSlot(event){
-  const target=event.target,slot=Number(target.value);
+  cancelSorting();const target=event.target,slot=Number(target.value);
   if(slot===activeSlot.value)return;
   const ok=await mutate('/api/queue/slots',{slot});
   if(!ok)target.value=String(activeSlot.value);
@@ -107,7 +121,8 @@ createApp({setup(){
   await mutate('/api/queue',{action:'move',key:selectedKey.value,index});
  }
  function closeEditing(){if(busy.value)return;editing.value=false;editingKey.value='';editingSlot.value=0;}
- async function startEditing(){
+ async function startEditing(key){
+  if(typeof key==='string')selectedKey.value=key;
   const item=selectedItem.value;if(!item)return;
   editingKey.value=item.key;editingSlot.value=activeSlot.value;
   editName.value=item.username||'';editNote.value=item.note||'';
@@ -148,7 +163,7 @@ createApp({setup(){
  }
  onMounted(()=>{void loadAppearance();void refresh();connectSSE();pollTimer=setInterval(refresh,8000);window.addEventListener('keydown',keyHandler);});
  onUnmounted(()=>{events?.close();clearInterval(pollTimer);window.removeEventListener('keydown',keyHandler);});
- return {queue,slotInfo,activeSlot,selectedKey,selectedIndex,selectedItem,slotCount,visibleQueue,search,newName,notice,noticeLevel,
+ return {sorting,sortedQueue,sortBefore,sortKeys,dragging,beginSorting,cancelSorting,dragStart,dragOver,dragDrop,saveSorting,queue,slotInfo,activeSlot,selectedKey,selectedIndex,selectedItem,slotCount,visibleQueue,search,newName,notice,noticeLevel,
   busy,streamReady,needsAuth,tokenInput,saveToken,editing,editNote,editName,editSource,editNameInput,editingManual,closeEditing,position,platformName,queueSourceLabel,timeOf,
   refresh,selectItem,switchSlot,addQueue,insertQueue,moveSelected,startEditing,saveEdit,removeSelected,completeFirst,clearQueue};
 }}).mount('#app');
