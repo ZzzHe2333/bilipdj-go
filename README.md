@@ -93,7 +93,29 @@ Python `bilipdj` 保持 [PR #314](https://github.com/ZzzHe2333/bilipdj/pull/314)
 - **新安装首次打开网页**会出现可跳过的分步向导：B站、抖音启用和直播间地址、B站扫码登录、排队关键词、队列上限与每日次数限制。完成或跳过写入当前数据目录 `state.json`；以后不会自动打扰。升级已配置的旧版本默认跳过向导；需要时使用侧边栏底部的「新手配置引导」重新打开。
 - **Go 独立数据目录**：Windows `%APPDATA%\bilipdj-go`（配置）和 `%LOCALAPPDATA%\bilipdj-go`（队列/备份/缓存），Linux `~/.local/share/bilipdj-go`，macOS `~/Library/Application Support/bilipdj-go`。已识别的旧 Go 状态 COPY-only 迁移，不动 Python `bilipdj`；显式 `-data` / `BILIPDJ_DATA_DIR` 不变。
 - 从源码手动编译 Windows 无黑框版本：`go build -ldflags="-H=windowsgui" -o bilipdj-go.exe .`。普通 `go run .` 不会自动启用 GUI 子系统。Linux/macOS/Docker 保持控制台运行，不主动打开浏览器。
-- 如果托盘图标没有直接显示，请点击任务栏右下角的「显示隐藏的图标」。目前使用 Windows 通用应用图标；将在后续版本添加独立品牌图标。此模式仍需在真实 Windows 桌面验收托盘菜单与浏览器打开行为。
+- 如果托盘图标没有直接显示，请点击任务栏右下角的「显示隐藏的图标」。托盘采用独立的高对比排队图标（失败才回退到 Windows 通用图标）；未来发行构建自动把项目 ICO 写入 EXE 资源。图标已在源码中接入，但 Windows 真机托盘缩放及 Explorer 缓存效果仍需实机验收。
+
+## BiliPDJ-Go 品牌图标（Vue / Windows）
+
+本项目是**直播排队管理工具**，图标由小电视与三行排队记录组成，**不是音乐播放器**。
+
+- `web/bilipdj-go.svg`：Vue 控制台和独立排队管理页的主品牌图标；`web/bilipdj-go-tray.svg`：浏览器 Favicon，16px 下保留高对比队列形状。
+- `assets/*.svg`：全彩、简化托盘、单色三种矢量母版。
+- `assets/bilipdj-go.ico.b64`：Windows EXE 多尺寸 ICO 的 Base64 文本源；`assets/bilipdj-go-tray.ico.b64`：Windows 托盘专用多尺寸 ICO 的 Base64 文本源。不是数据存档，也不包含账号信息。
+- Windows 运行时直接内嵌托盘 ICO 并使用 `CreateIconFromResourceEx`，按系统小图标尺寸优先选择最佳帧；不用向用户数据目录写图标文件。
+- `.github/workflows/release.yml` 在**未来用户手动触发的构建**中先解码 ICO，再用 `go-winres v0.3.3` 把主图标嵌入 Windows AMD64/ARM64 EXE；打包包含两个可直接使用的 `.ico`。目前不会自动触发打包或 Release。
+
+源码目录需要实体 ICO 文件时可以手工还原：
+
+```sh
+base64 --decode assets/bilipdj-go.ico.b64 > assets/bilipdj-go.ico
+base64 --decode assets/bilipdj-go-tray.ico.b64 > assets/bilipdj-go-tray.ico
+# 手动 Windows 交叉编译（以 amd64 为例）
+go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out rsrc --manifest gui --icon assets/bilipdj-go.ico
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H=windowsgui" -o bilipdj-go.exe .
+```
+
+PowerShell 解码：`[IO.File]::WriteAllBytes("assets/bilipdj-go.ico",[Convert]::FromBase64String((Get-Content "assets/bilipdj-go.ico.b64" -Raw).Trim()))`，托盘图标同理。普通 `go build` 可以运行并拥有品牌托盘图标，但不执行资源生成命令时 Windows Explorer 仍可能显示通用 EXE 图标；发行脚本会自动补全。
 
 ## Docker
 
