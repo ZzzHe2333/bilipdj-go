@@ -48,7 +48,7 @@ func TestQRLoginBindsOnlyRequestedBilibiliRoom(t *testing.T){
  if code,_:=post("/api/bili/qr/start",`{"instance_id":"bilibili-room-missing"}`);code!=400{t.Fatalf("unknown room start status %d",code)}
  code,_:=post("/api/bili/qr/start",`{"instance_id":"bilibili-room-two"}`)
  if code!=200{t.Fatalf("targeted QR start status %d",code)}
- code,result:=post("/api/bili/qr/poll",`{}`)
+ code,result:=post("/api/bili/qr/poll",`{"instance_id":"bilibili-room-two"}`)
  if code!=200||!strings.Contains(result,"success")||strings.Contains(result,"room-two-only"){t.Fatalf("targeted QR finish: %d %s",code,result)}
  if a.config.Bilibili.Cookie!="SESSDATA=original"{t.Fatal("targeted QR overwrote primary login Cookie")}
  if !strings.Contains(a.config.Listeners[0].Cookie,"SESSDATA=room-two-only"){t.Fatal("targeted QR did not save extra room Cookie")}
