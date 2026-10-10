@@ -13,6 +13,7 @@ import (
 )
 
 func (a *App) legacyRoutes(mux *http.ServeMux) {
+ a.styleSlotRoutes(mux)
 	mux.HandleFunc("POST /api/legacy/preview", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
