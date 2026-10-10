@@ -221,16 +221,19 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 			words := strings.SplitN(input, " ", 3)
 			if len(words) == 3 {
 				n, err := strconv.Atoi(words[1])
-				if err == nil && n > 0 && n <= 30 && (words[0] != "无影插" || n <= 20) && n <= len(a.queue)+1 {
+				if err == nil && n > 0 && n <= 30 && (words[0] != "无影插" || n <= 20) {
 					name := strings.TrimSpace(words[2])
 					if name != "" && len([]rune(name)) <= 200 && len(a.queue) < 10000 {
 						if words[0] == "插队" {
 							name = "@" + name
 						}
 						item := QueueItem{Key: fmt.Sprintf("admin:%d", time.Now().UnixNano()), Platform: "manual", Username: name, At: e.Time}
+						// Python list.insert clamps positions beyond the current queue end.
+                        at:=n-1
+                        if at>len(a.queue){at=len(a.queue)}
 						a.queue = append(a.queue, QueueItem{})
-						copy(a.queue[n:], a.queue[n-1:len(a.queue)-1])
-						a.queue[n-1] = item
+						copy(a.queue[at+1:], a.queue[at:len(a.queue)-1])
+						a.queue[at] = item
 						return true
 					}
 				}
