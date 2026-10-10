@@ -215,6 +215,7 @@ createApp({setup(){
    if(selectedVersion.value&&!versions.value.some(v=>v.version===selectedVersion.value))selectedVersion.value='';
   }catch(e){versionsError.value=e.message;versions.value=[];}
  }
+ watch(page,p=>{if(p==='update')void loadVersionHistory()});
  async function checkUpdate(){
   busy.value=true;updateReady.value=null;downloadProgress.value=null;
   try{
