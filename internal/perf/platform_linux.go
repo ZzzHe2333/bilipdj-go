@@ -50,7 +50,7 @@ func readMachine()(m machineCounters){
   p:=strings.Fields(line)
   if len(p)>=5&&p[0]=="cpu" {
    var nums []uint64
-   for _,s:=range p[1:] {n,e:=strconv.ParseUint(s,10,64);if e!=nil{break};nums=append(nums,n)}
+   for i,s:=range p[1:] {if i>=8{break};n,e:=strconv.ParseUint(s,10,64);if e!=nil{break};nums=append(nums,n)}
    if len(nums)>=4 {
     for _,n:=range nums{m.CPUTotal+=n}
     m.CPUBusy=m.CPUTotal-nums[3]
