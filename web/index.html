@@ -203,15 +203,35 @@
 </template>
 
 <template v-else-if="page==='permissions'">
-<div class="page-title"><div><p class="eyebrow">DESKTOP PERMISSIONS</p><h1>权限管理</h1><p class="muted">对应 Python Windows 版「权限」页；保存后自动同步后端身份名单。</p></div></div>
-<section class="panel rules permission-panel"><h2>弹幕与队列权限</h2>
-<label class="check"><input type="checkbox" v-model="config.switches.fangguan_op"> 允许 B站房管执行管理指令</label>
-<div class="permission-grid"><label>管理员名单（每行一个昵称）<textarea rows="7" v-model="adminsText" placeholder="管理员昵称"></textarea></label>
-<label>最高管理员（仅最高管理员可以增删管理员）<textarea rows="7" v-model="superAdminsText" placeholder="最高管理员昵称"></textarea></label>
-<label>舰长白名单（真实舰长等级同时生效）<textarea rows="7" v-model="guardsText" placeholder="舰长昵称"></textarea></label>
-<label>黑名单（昵称或用户 ID，每行一个）<textarea rows="7" v-model="blacklistText" placeholder="拒绝其排队或管理命令"></textarea></label></div>
-<p class="tip">警告：历史兼容的昵称授权仍有同名冒用风险；对高权限用户建议核实平台身份。黑名单优先于管理员身份。</p>
-<button class="btn primary" :disabled="busy" @click="saveConfig">{{busy?'正在保存…':'保存权限配置'}}</button></section>
+ <div class="page-title"><div><p class="eyebrow">IDENTITY & ACCESS</p><h1>权限管理</h1><p class="muted">只显示明确配置过的昵称。不在名单里的用户依然是普通用户，不会自动添加到表格。</p></div>
+ <div class="title-actions"><button class="btn" @click="editPermission()">＋ 新增用户</button><button class="btn primary" :disabled="busy" @click="savePermissions">{{busy?'正在保存…':'保存权限列表'}}</button></div></div>
+ <div class="panel rules">
+  <div class="permission-actions"><label class="check"><input type="checkbox" v-model="config.switches.fangguan_op"> 允许 B站房管使用管理命令（单独开关）</label><button class="btn small" @click="saveConfig">保存房管开关</button><span class="tip" v-if="permissionDirty">权限存在未保存修改</span></div>
+  <div class="queue-table-wrap"><table class="permission-table"><thead><tr><th>ID（昵称）</th><th>平台</th><th>身份</th><th>权限内容</th><th>操作</th></tr></thead>
+   <tbody><tr v-for="(person,i) in permissionRows" :key="person.platform+':'+person.id" @dblclick="editPermission(i)">
+    <td><strong>{{person.id}}</strong></td>
+    <td>{{scopeLabel(person.platform)}}</td><td>{{roleLabel(person.role)}}</td>
+    <td>{{person.role==='super_admin'?'全部权限':person.role==='admin'||person.role==='part_time'?(person.capabilities||[]).map(capLabel).join('、')||'未授权管理指令':'无管理权限'}}</td>
+    <td class="permission-actions"><button type="button" class="btn small" @click.stop="editPermission(i)">编辑</button><button type="button" class="btn small" @click.stop="removePermission(i)">移除</button></td>
+   </tr><tr v-if="!permissionRows.length"><td colspan="5" class="empty">尚无手动配置的权限；点击「新增用户」添加。</td></tr></tbody></table></div>
+  <p class="tip">同一昵称可分别配置 B站、抖音或两平台。超级管理员拥有所有权限；管理员默认不允许任命管理员，且其管理命令可以逐项关闭；兼职仅获得被勾选的权限。黑名单可由管理员通过弹幕「拉黑 昵称」添加。</p>
+  <p class="tip">权限按平台和显示昵称匹配；无法证明昵称唯一身份。敏感权限建议另行核实平台真实用户 ID，避免同名冒用。</p>
+ </div>
+ <div v-if="permissionEditing" class="queue-dialog-backdrop" @click.self="permissionEditing=false">
+  <section class="queue-edit-dialog" role="dialog" aria-modal="true" aria-label="编辑权限" @keydown.esc.stop.prevent="permissionEditing=false">
+   <header class="queue-edit-header"><h2>{{permissionEditIndex<0?'新增权限':'编辑权限'}}</h2><button type="button" class="dialog-close" @click="permissionEditing=false">×</button></header>
+   <form class="queue-edit-form" @submit.prevent="confirmPermission">
+    <label>ID（昵称）<input v-model.trim="permissionDraft.id" maxlength="60" required></label>
+    <label>认可平台<select v-model="permissionDraft.platform"><option value="bilibili">B站</option><option value="douyin">抖音</option><option value="all">B站和抖音</option></select></label>
+    <label>身份<select v-model="permissionDraft.role" @change="permissionRoleChanged"><option value="super_admin">超级管理员</option><option value="admin">管理员</option><option value="part_time">兼职</option><option value="user">用户</option><option value="blacklist">黑名单</option></select></label>
+    <fieldset v-if="permissionDraft.role==='admin'||permissionDraft.role==='part_time'"><legend>权限内容（取消勾选即禁止该管理指令）</legend>
+     <div class="permission-capabilities"><label v-for="cap in permissionCaps" :key="cap.id"><input type="checkbox" :checked="permissionDraft.capabilities.includes(cap.id)" @change="permissionCapToggle(cap.id,$event.target.checked)"> {{cap.label}}</label></div>
+    </fieldset>
+    <p class="tip" v-else>{{permissionDraft.role==='super_admin'?'超级管理员自动拥有全部权限，无需逐项勾选。':'此身份没有管理员指令权限。'}}</p>
+    <div class="queue-dialog-actions"><button type="button" class="btn" @click="permissionEditing=false">取消</button><button type="submit" class="btn primary">确认修改</button></div>
+   </form>
+  </section>
+ </div>
 </template>
 <template v-else-if="page==='overlay'">
 <div class="page-title"><div><p class="eyebrow">OBS OVERLAY</p><h1>OBS 浏览器源样式</h1><p class="muted">旧版透明排队浏览器源 /index 已兼容；以下改动无需保存就会实时显示在预览框中。</p></div><a class="btn" href="/index" target="_blank" rel="noopener">单独打开 OBS 展示 ↗</a></div>
