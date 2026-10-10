@@ -57,7 +57,7 @@
 - **独立排队管理**：`http://127.0.0.1:9816/queue.html`，可在手机/平板浏览器操作，但远程访问须自行配置安全网络及授权。
 - **OBS 透明队列**：`http://127.0.0.1:9816/index`；`/overlay.html` 继续兼容。
 
-> ZIP 名称代表打包目标，不代表任何指定版本已发布。当前源码版本为 **0.10.3**；下载与更新请以 [Releases](https://github.com/ZzzHe2333/bilipdj-go/releases) 的实际资产为准。Windows 包另带 `bilipdj-go-mcp.exe` 供 stdio MCP 客户端使用。
+> ZIP 名称代表打包目标，不代表任何指定版本已发布。当前源码版本为 **0.10.4**；下载与更新请以 [Releases](https://github.com/ZzzHe2333/bilipdj-go/releases) 的实际资产为准。Windows 包另带 `bilipdj-go-mcp.exe` 供 stdio MCP 客户端使用。
 
 ## 🐳 Docker：使用同一套 Vue Web 控制台
 
