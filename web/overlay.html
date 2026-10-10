@@ -21,10 +21,7 @@ p{opacity:.6}
 const {createApp,ref,computed,onMounted,onUnmounted,nextTick,watch}=Vue;
 createApp({setup(){
 const queue=ref([]),activeSlot=ref(1),savedStyle=ref({}),previewStyle=ref(null),scrollEl=ref(null),demoMode=ref(false);
-const demoEntries=[
- {key:'obs-demo-1',username:'预览用户 A',note:'这里显示排队内容',platform:'manual',source_platform:''},
- {key:'obs-demo-2',username:'预览用户 B',note:'可拖动字号滑块',platform:'bilibili'}
-];
+const demoEntries=['预览用户 01','预览用户 02','预览用户 03','预览用户 04','预览用户 05','预览用户 06','预览用户 07','预览用户 08','预览用户 09','预览用户 10','预览用户 11','预览用户 12'].map((username,i)=>({key:'obs-demo-'+i,username}));
 const displayQueue=computed(()=>demoMode.value&&queue.value.length===0?demoEntries:queue.value);
 const style=computed(()=>previewStyle.value??savedStyle.value);
 function numeric(key,fallback,min,max){const v=style.value[key];const n=Number(v);return v!==null&&v!==undefined&&v!==''&&Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback}
