@@ -799,6 +799,9 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         if cfg.Listeners==nil&&len(a.config.Listeners)>0 {
           cfg.Listeners=append([]ListenerConfig{},a.config.Listeners...)
         }
+        if cfg.Permissions==nil&&a.config.Permissions!=nil{
+           cfg.Permissions=append([]PermissionEntry{},a.config.Permissions...)
+        }
         // Credential preservation uses immutable instance IDs, not array indices.
         // Removed IDs do not inherit or leak any old Cookie.
         byID:=make(map[string]string,len(a.config.Listeners))
