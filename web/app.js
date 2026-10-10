@@ -13,6 +13,91 @@ createApp({setup(){
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
+
+ // Browser-local settings only. No background sampler exists in Go.
+ // Non-linear slider anchor points (0,12,120,1200) map to positions 0,100,200,300.
+ const perfPreferenceKey='bilipdj-go-perf-interval';
+ function boundPerfSeconds(raw,fallback=2){
+  const n=Number(raw);if(!Number.isFinite(n))return fallback;
+  return Math.max(0,Math.min(1200,Math.round(n)));
+ }
+ function savedPerfInterval(){
+  try{const v=window.localStorage.getItem(perfPreferenceKey);return v===null?2:boundPerfSeconds(v)}catch{return 2}
+ }
+ const perfInterval=ref(savedPerfInterval()),perfData=ref(null),perfError=ref(''),perfLoading=ref(false);
+ const perfCards=[
+  {key:'cpu',title:'进程 CPU',scope:'本项目进程',description:'本程序占全部逻辑处理器总算力的比例'},
+  {key:'system_cpu',title:'整机 CPU',scope:'整机',description:'包含其他软件的使用率'},
+  {key:'memory',title:'内存占用',scope:'本项目进程',description:'实际常驻物理内存，平台可能使用峰值替代'},
+  {key:'data_disk',title:'数据目录占用',scope:'BiliPDJ 数据目录',description:'占用空间，每 60 秒最多扫描一次'},
+  {key:'disk_read',title:'磁盘读取速率',scope:'本项目进程 I/O',description:'进程读取字节数的增量'},
+  {key:'disk_write',title:'磁盘写入速率',scope:'本项目进程 I/O',description:'进程写入字节数的增量'},
+  {key:'network_receive',title:'网络接收速率',scope:'整机/容器接口',description:'包含其他程序的网络流量'},
+  {key:'network_send',title:'网络发送速率',scope:'整机/容器接口',description:'包含其他程序的网络流量'},
+  {key:'gpu',title:'GPU 占用',scope:'本项目 GPU',description:'没有可靠的统一进程级 GPU 占用接口'},
+  {key:'npu',title:'NPU 占用',scope:'本项目 NPU',description:'没有可靠的统一进程级 NPU 占用接口'}
+ ];
+ const perfSliderPosition=computed(()=>{
+  const s=perfInterval.value;
+  if(s===0)return 0;
+  if(s<=12)return Math.round(1+(s-1)*99/11);
+  if(s<=120)return Math.round(100+(s-12)*100/108);
+  return Math.round(200+(s-120)*100/1080);
+ });
+ function setPerfInterval(v){
+  const value=boundPerfSeconds(v,perfInterval.value);
+  perfInterval.value=value;
+  try{window.localStorage.setItem(perfPreferenceKey,String(value))}catch{}
+ }
+ function setPerfSlider(pos){
+  const p=Math.max(0,Math.min(300,Number(pos)||0));
+  if(p===0)return setPerfInterval(0);
+  if(p<=100)return setPerfInterval(Math.max(1,Math.round(1+(p-1)*11/99)));
+  if(p<=200)return setPerfInterval(Math.round(12+(p-100)*108/100));
+  setPerfInterval(Math.round(120+(p-200)*1080/100));
+ }
+ function formatPerfValue(m){
+  if(!m||!m.available||!Number.isFinite(m.value))return '—';
+  if(m.unit==='%' )return m.value.toFixed(1)+'%';
+  if(m.unit==='B'||m.unit==='B/s'){
+   let value=m.value,scale=0;const units=['B','KiB','MiB','GiB','TiB'];
+   while(value>=1024&&scale<units.length-1){value/=1024;scale++}
+   return (value>=100?value.toFixed(0):value>=10?value.toFixed(1):value.toFixed(2))+' '+units[scale]+(m.unit==='B/s'?'/s':'');
+  }
+  return m.value.toFixed(1)+' '+(m.unit||'');
+ }
+ function perfTime(v){const d=new Date(v);return Number.isNaN(d.getTime())?'—':d.toLocaleTimeString('zh-CN',{hour12:false})}
+ let perfTimer=null,perfAbort=null,perfGeneration=0;
+ function stopPerf(){
+  perfGeneration++;
+  if(perfTimer!==null){clearTimeout(perfTimer);perfTimer=null}
+  if(perfAbort){perfAbort.abort();perfAbort=null}
+  perfLoading.value=false;
+ }
+ async function requestPerf(){
+  if(page.value!=='performance'||perfInterval.value===0||document.hidden)return;
+  const id=perfGeneration;
+  const aborter=new AbortController();perfAbort=aborter;perfLoading.value=true;
+  try{
+   const snapshot=await api('/api/performance',{signal:aborter.signal,cache:'no-store'});
+   if(id!==perfGeneration)return;
+   perfData.value=snapshot;perfError.value='';
+  }catch(e){if(id===perfGeneration&&e.name!=='AbortError')perfError.value=e.message||String(e)}
+  finally{
+   if(id===perfGeneration){
+    perfAbort=null;perfLoading.value=false;
+    if(page.value==='performance'&&perfInterval.value>0&&!document.hidden)
+     perfTimer=setTimeout(requestPerf,perfInterval.value*1000);
+   }
+  }
+ }
+ function restartPerf(){
+  stopPerf();
+  if(page.value==='performance'&&perfInterval.value>0&&!document.hidden){void requestPerf()}
+ }
+ function refreshPerfNow(){if(page.value!=='performance'||perfInterval.value===0)return;restartPerf()}
+ function perfVisibilityChanged(){restartPerf()}
+ watch([page,perfInterval],restartPerf);
  const platforms=[{id:'bilibili',name:'Bilibili 直播',placeholder:'直播间号码，如 6'},{id:'douyin',name:'抖音直播',placeholder:'live.douyin.com/xxxx'}];
  const platformCatalog=[
   {id:'bilibili',name:'Bilibili 直播',supported:true,placeholder:'B站直播间号'},
@@ -171,7 +256,7 @@ createApp({setup(){
  async function importPythonQueues(){if(!window.confirm('将 Python archives 目录中的排队 CSV 导入 Go 的对应槽位？Go 原存档将先备份，Python CSV 保持不变。'))return;storageBusy.value=true;try{const v=await api('/api/storage/python-queues/import',{method:'POST',body:'{}'});message(v.message||'存档已导入','success');await refresh()}catch(e){message('导入失败：'+e.message,'error')}finally{storageBusy.value=false}}
  async function exportPythonQueue(){try{const headers={};const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;const resp=await fetch('/api/storage/queue-export?slot='+Number(selectedSlot.value),{headers});if(!resp.ok)throw Error('HTTP '+resp.status);const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='queue_archive_slot_'+selectedSlot.value+'.csv';a.click();URL.revokeObjectURL(url)}catch(e){message('导出失败：'+e.message,'error')}}
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
- onMounted(()=>{refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
- onUnmounted(()=>{if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
- return {platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
+ onUnmounted(()=>{stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
+ return {perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
