@@ -82,7 +82,7 @@ createApp({setup(){
    const snapshot=await api('/api/performance',{signal:aborter.signal,cache:'no-store'});
    if(id!==perfGeneration)return;
    perfData.value=snapshot;perfError.value='';
-  }catch(e){if(id===perfGeneration&&e.name!=='AbortError')perfError.value=e.message||String(e)}
+  }catch(e){if(id===perfGeneration&&e.name!=='AbortError'){perfData.value=null;perfError.value=e.message||String(e)}}
   finally{
    if(id===perfGeneration){
     perfAbort=null;perfLoading.value=false;
