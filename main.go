@@ -96,6 +96,14 @@ func main() {
 	backend := app.Routes(http.FileServer(http.FS(content)))
 	root := http.NewServeMux()
 	root.Handle("/mcp", mcp.New(backend, version))
+	// Legacy Python Web OBS browser-source URL: /index. Reuse exactly the same
+	// standalone transparent Go renderer without redirecting or changing /index.html.
+	root.HandleFunc("GET /index", func(w http.ResponseWriter, r *http.Request) {
+		alias := r.Clone(r.Context())
+		alias.URL.Path = "/overlay.html"
+		alias.URL.RawPath = ""
+		backend.ServeHTTP(w, alias)
+	})
 	root.Handle("/", backend)
 	server := &http.Server{Addr: *listen, Handler: root, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 65 * time.Second}
 	listener, err := net.Listen("tcp", *listen)

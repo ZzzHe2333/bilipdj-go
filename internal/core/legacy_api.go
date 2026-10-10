@@ -160,6 +160,9 @@ func (a *App) saveMap(w http.ResponseWriter, r *http.Request, kind string) {
 	if e == nil {
 		e = a.writeWebAppearanceFile(kind, raw)
 	}
+	if e == nil && kind == "style" {
+		a.publishLocked(Event{Type: "style", Data: obj})
+	}
 	if e != nil {
 		a.style = oldStyle
 		a.appearance = oldAppearance
