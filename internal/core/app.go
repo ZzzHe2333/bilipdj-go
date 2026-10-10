@@ -42,7 +42,7 @@ type Config struct {
 	Admins              []string       `json:"admins"`
 	SuperAdmins         []string       `json:"super_admins"`
 	Guards              []string       `json:"guards"`
-	Permissions         []PermissionEntry `json:"permissions,omitempty"`
+	Permissions         []PermissionEntry `json:"permissions"`
 	DailyQueueLimit     int            `json:"daily_queue_limit"`
 	DailyQueueResetTime string         `json:"daily_queue_reset_time"`
 	Blacklist           []string       `json:"blacklist"`
