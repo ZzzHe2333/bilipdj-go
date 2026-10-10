@@ -744,20 +744,23 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		a.appendLogLocked("INFO", "queue", fmt.Sprintf("切换到队列存档 %d，现有 %d 人", a.config.ArchiveSlot, len(a.queue)))
 		send(w, 200, map[string]any{"active_slot": a.config.ArchiveSlot, "slots": a.slotCountsLocked(), "entries": a.queue})
 	})
-	mux.HandleFunc("GET /api/platforms/active", func(w http.ResponseWriter, r *http.Request) {
-		a.mu.RLock()
-		defer a.mu.RUnlock()
-		active := []string{}
-		if a.config.Bilibili.Enabled {
-			active = append(active, "bilibili")
-		}
-		if a.config.Douyin.Enabled {
-			active = append(active, "douyin")
-		}
-        for _,room:=range a.config.Listeners{if room.Enabled{active=append(active,room.ID)}}
-		send(w, 200, map[string]any{"active": active})
-	})
-	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/platforms/active", func(w http.ResponseWriter,r *http.Request){
+  a.mu.RLock()
+  defer a.mu.RUnlock()
+  active:=[]string{} // legacy callers expect platform names, never room IDs
+  instances:=[]string{}
+  seen:=map[string]bool{}
+  for _,item:=range configuredListeners(a.config){
+   if !item.Enabled{continue}
+   instances=append(instances,item.ID)
+   if !seen[item.Platform]{
+    seen[item.Platform]=true
+    active=append(active,item.Platform)
+   }
+  }
+  send(w,200,map[string]any{"active":active,"instances":instances})
+ })
+ mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
 		c := redactExtraCookies(a.config)
