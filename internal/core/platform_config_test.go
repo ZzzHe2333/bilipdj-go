@@ -9,7 +9,8 @@ import (
 )
 
 func TestMultiplatformVisibleConfigsPersistAndUnimplementedStayDisabled(t *testing.T) {
-    a := New(t.TempDir(), "0.10.1", "org/demo")
+    dir := t.TempDir()
+    a := New(dir, "0.10.1", "org/demo")
     c := defaultConfig()
     c.Bilibili.Room = ""
     c.Douyin.Room = "https://live.douyin.com/123456?from=share"
@@ -25,11 +26,10 @@ func TestMultiplatformVisibleConfigsPersistAndUnimplementedStayDisabled(t *testi
     w := httptest.NewRecorder()
     a.Routes(http.NotFoundHandler()).ServeHTTP(w, req)
     if w.Code != 200 { t.Fatalf("save status %d: %s", w.Code, w.Body.String()) }
-    b := New(t.TempDir(), "0.10.1", "org/demo")
-    _ = b
-    a.mu.RLock()
-    saved := a.config
-    a.mu.RUnlock()
+    b := New(dir, "0.10.1", "org/demo")
+    b.mu.RLock()
+    saved := b.config
+    b.mu.RUnlock()
     if len(saved.VisiblePlatforms) != 6 || saved.Huya.Room != "123" { t.Fatalf("visible platforms not persisted to state: %+v", saved) }
     c.Huya.Enabled = true
     if _, err := cleanConfig(c); err == nil { t.Fatal("unimplemented Huya listener must not be enabled") }
