@@ -12,7 +12,7 @@ createApp({setup(){
  function dragDrop(event,target){if(!sorting.value)return;event.preventDefault();const a=sortKeys.value.indexOf(dragging.value),b=sortKeys.value.indexOf(target);if(a<0||b<0||a===b)return;const next=[...sortKeys.value];next.splice(b,0,next.splice(a,1)[0]);sortKeys.value=next}
  async function saveSorting(){
   if(!sorting.value||busy.value)return;busy.value=true;++readSeq;
-  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value})});
+  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value,slot:Number(activeSlot.value)})});
    cancelSorting();notify('排队排序已保存并同步','success')
   }catch(e){notify('排序未保存：'+e.message,'error');cancelSorting()}
   finally{busy.value=false;void refresh()}
