@@ -13,6 +13,10 @@ createApp({setup(){
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
+ const versions=ref([]),selectedVersion=ref(''),versionsError=ref(''),downloadProgress=ref(null),downloading=ref(false);
+ const selectedRelease=computed(()=>versions.value.find(v=>v.version===selectedVersion.value)||null);
+ const targetSize=computed(()=>selectedRelease.value?.size||release.value?.size||0);
+ const canDownloadTarget=computed(()=>selectedVersion.value?!!selectedRelease.value&&!selectedRelease.value.current:!!release.value?.update_available);
 
  // Browser-local settings only. No background sampler exists in Go.
  // Non-linear slider anchor points (0,12,120,1200) map to positions 0,100,200,300.
@@ -194,10 +198,53 @@ createApp({setup(){
  async function addQueue(){if(!newName.value)return;await queueAction({action:'add',name:newName.value});newName.value=''}
  function removeQueue(key){queueAction({action:'remove',key})}
  function clearQueue(){if(window.confirm('确认清空当前全部排队？'))queueAction({action:'clear'})}
- async function checkUpdate(){busy.value=true;updateReady.value=null;try{release.value=await api('/api/update?source='+encodeURIComponent(updateSource.value));message('更新检查完成（'+({official:'GitHub 官方',accelerated:'自动加速池',akams:'github.akams.cn',ghfile:'ghfile.geekertao.top','github-dpik':'github.dpik.top','gh-dpik':'gh.dpik.top','gh-proxy-com':'GH-Proxy.com','gh-proxy-org':'GH-Proxy.org'}[release.value.source]||'代理线路')+'）','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
- async function downloadUpdate(){busy.value=true;try{const r=await api('/api/update/download',{method:'POST',body:JSON.stringify({source:updateSource.value})});updateReady.value=r;message('已下载且 SHA-256 校验通过，可安装并重启','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
+ let progressTimer=null;
+ function stopProgressPolling(){if(progressTimer!==null)clearInterval(progressTimer);progressTimer=null}
+ function fmtMiB(n){return (Math.max(0,Number(n)||0)/1048576).toFixed(2)}
+ function progressPhase(p){return ({checking:'正在检查版本',verifying:'正在校验 SHA256',downloading:'正在下载文件',ready:'下载及校验完成',error:'下载失败'})[p?.phase]||'等待下载'}
+ async function pollDownloadProgress(){
+  try{const data=await api('/api/update/progress',{cache:'no-store'});
+   if(downloading.value)downloadProgress.value=data;
+  }catch{/* The POST handler still returns an authoritative success/error. */}
+ }
+ async function loadVersionHistory(){
+  versionsError.value='';
+  try{
+   const rows=await api('/api/update/versions',{cache:'no-store'});
+   versions.value=Array.isArray(rows)?rows:[];
+   if(selectedVersion.value&&!versions.value.some(v=>v.version===selectedVersion.value))selectedVersion.value='';
+  }catch(e){versionsError.value=e.message;versions.value=[];}
+ }
+ async function checkUpdate(){
+  busy.value=true;updateReady.value=null;downloadProgress.value=null;
+  try{
+   release.value=await api('/api/update?source='+encodeURIComponent(updateSource.value));
+   message('已检查最新版本：'+release.value.version,'success');
+  }catch(e){message(e.message,'error')}
+  finally{busy.value=false}
+  await loadVersionHistory();
+ }
+ async function downloadUpdate(){
+  if(!canDownloadTarget.value||busy.value)return;
+  const selected=selectedRelease.value;
+  if(selected?.is_older){
+   if(!window.confirm('确认回退到 '+selected.version+'？旧版本可能无法读取新版存档格式。请先备份数据与队列存档，回退安装不会迁移或删除存档。'))return;
+  }
+  busy.value=true;downloading.value=true;updateReady.value=null;
+  downloadProgress.value={phase:'checking',version:selectedVersion.value||release.value?.version,total_bytes:targetSize.value,downloaded_bytes:0,percent:0,speed_bps:0,message:'正在检查下载来源和校验文件'};
+  stopProgressPolling();
+  progressTimer=setInterval(pollDownloadProgress,300);
+  try{
+   const r=await api('/api/update/download',{method:'POST',body:JSON.stringify({source:updateSource.value,version:selectedVersion.value,allow_downgrade:!!selected?.is_older})});
+   updateReady.value=r;await pollDownloadProgress();
+   message('已下载 '+r.version+' 且 SHA256 校验通过，可安装并重启','success');
+  }catch(e){
+   downloadProgress.value={...downloadProgress.value,phase:'error',message:e.message};
+   message('下载失败：'+e.message,'error');
+  }finally{downloading.value=false;busy.value=false;stopProgressPolling()}
+ }
  async function installUpdate(){if(!updateReady.value)return;
-  if(!window.confirm('确认安装 '+updateReady.value.version+' 并重启 BiliPDJ Go？\n安装将短暂中断直播监听。旧版程序会保留备份。'))return;
+  if(!window.confirm('确认安装 '+updateReady.value.version+' 并重启 BiliPDJ Go？\n安装会短暂中断直播；如果是回退到旧版，请先备份现有存档，旧程序可能无法识别新版数据格式。原二进制程序会保留备份。'))return;
   busy.value=true;try{const r=await api('/api/update/install',{method:'POST',body:'{}'});message(r.message+'。请等待浏览器自动重新打开；如果失败可从托盘打开或手动启动。','success');updateReady.value=null}
   catch(e){message('安装未启动：'+e.message,'error')}finally{busy.value=false}}
 
@@ -257,6 +304,6 @@ createApp({setup(){
  async function exportPythonQueue(){try{const headers={};const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;const resp=await fetch('/api/storage/queue-export?slot='+Number(selectedSlot.value),{headers});if(!resp.ok)throw Error('HTTP '+resp.status);const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='queue_archive_slot_'+selectedSlot.value+'.csv';a.click();URL.revokeObjectURL(url)}catch(e){message('导出失败：'+e.message,'error')}}
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000)});
- onUnmounted(()=>{stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
- return {perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);stopQR()});
+ return {versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
