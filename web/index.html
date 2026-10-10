@@ -150,10 +150,11 @@
  <label>条目水平留白（px）<input type="number" min="0" max="120" v-model.number="obsStyle.queue_item_padding_x"></label>
  <label>条目垂直留白（px）<input type="number" min="0" max="100" v-model.number="obsStyle.queue_item_padding_y"></label>
  <label>背景圆角（px）<input type="number" min="0" max="60" v-model.number="obsStyle.board_radius"></label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_header">显示标题及存档</label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_sequence">显示序号</label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_platform">显示来源平台</label>
- <label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">自动滚动</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.obs_show_header">显示标题与存档（默认关闭）</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_sequence">显示序号（默认仅用户名）</label>
+ <label>最多同时显示人数<input type="number" min="1" max="100" v-model.number="obsStyle.queue_visible_count"></label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">开启列表自动滚动</label>
+ <label>滚动速度（像素/秒）<input type="range" min="1" max="300" step="1" v-model.number="obsStyle.queue_scroll_speed"><input type="number" min="1" max="300" v-model.number="obsStyle.queue_scroll_speed"></label>
 </fieldset><fieldset><legend>色彩与效果</legend>
  <label class="check obs-important-check"><input type="checkbox" v-model="obsStyle.transparent_background">纯透明背景（推荐，原版 OBS 样式）</label>
  <p class="tip">勾选后整个页面的背景 Alpha 为 0，即使以前存档设置过深色看板也会保持透明。</p>
