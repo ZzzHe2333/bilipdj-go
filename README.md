@@ -86,7 +86,7 @@ docker compose ps
 | 📋 运行日志 | 首页显示平台连接、排队与系统事件；支持筛选、搜索、复制和导出 TXT |
 | 🪟 Web 与 Windows | Vue 3 离线控制台、独立排队管理页、Windows 无黑框启动与品牌托盘图标、首次使用向导、可选登录自启（默认关闭） |
 | 🎬 OBS 展示 | 旧版 `/index` 地址兼容；默认**只显示用户名**，可选序号、显示人数、自动滚动速度、字号与背景样式 |
-| 📈 性能监测 | 默认每 2 秒采样，可选 0（关闭）或 1–1200 秒；显示受平台支持的 CPU、内存、进程 I/O、磁盘与网络口径；**不虚报 GPU/NPU 数据** |
+| 📈 性能监测 | 固定七项：进程 CPU、进程内存、Go 数据目录大小、进程磁盘读写速率、项目程序文件大小、Go 排队存档大小；默认 2 秒，支持 0（关闭）或 1–1200 秒；不采集整机 CPU、网络、GPU、NPU |
 | 🎁 B站礼物资格 | 可配置礼物白名单、资格去重及插队消费；默认关闭，依赖真实有效的直播事件 |
 | 🔄 应用内更新 | GitHub 官方 / 第三方公益加速线路、下载进度、SHA-256 校验、确认后更新与异常回滚；可查看最近 10 个正式版本并手动降级 |
 | 🤖 AI / MCP | `/mcp` 和 `--mcp-stdio`；默认只读，写操作需要独立授权 Token |
@@ -212,7 +212,7 @@ go vet ./...
 | [功能差异审核](./docs/FEATURE_PARITY.md) | 原 Python 版与 Go 版的支持差异和未验证部分 |
 | [用户数据与迁移](./docs/USER_DATA_COMPAT.md) | Windows / Linux / macOS 数据目录、Python/Go 隔离 |
 | [更新器说明](./docs/UPDATER.md) | 公益加速节点、进度、历史版本、回滚 |
-| [性能监测](./docs/PERFORMANCE.md) | CPU、内存、I/O、网络监测口径与采样设置 |
+| [性能监测](./docs/PERFORMANCE.md) | 固定七项监测、项目文件及 Go 存档空间统计口径、采样设置 |
 | [MCP 接入指南](./docs/MCP.md) | HTTP/stdio MCP、安全授权与使用示例 |
 | [开机自启](./docs/AUTOSTART.md) | Windows 托盘/Web 同步，Linux/macOS 登录启动项，Docker 限制 |
 | [README 技术说明归档](./docs/README_TECHNICAL_ARCHIVE.md) | 重排前完整的迁移记录、兼容 API、鉴权排障和版本历史 |
