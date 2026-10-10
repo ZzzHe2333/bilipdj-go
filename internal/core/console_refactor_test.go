@@ -103,6 +103,17 @@ func TestPermissionAPIMasksNoImplicitMembers(t *testing.T){
  if w.Code!=200{t.Fatalf("save roles: %d %s",w.Code,w.Body.String())}
  if role,ok:=app.config.effectiveEntry(live.Event{Platform:"douyin",Username:"B"});ok{t.Fatal("B station admin leaked across platform:",role)}
  if len(app.config.Permissions)!=2{t.Fatal("roles not persisted")}
+ // Explicitly empty permission rows must NOT reactivate old broad legacy roles.
+ app.config.Admins=[]string{"legacy-admin"}
+ empty:=consoleRequest(t,app,"POST","/api/permissions",map[string]any{"entries":[]any{}})
+ if empty.Code!=200{t.Fatalf("cannot clear list: %d %s",empty.Code,empty.Body.String())}
+ reloaded:=New(strings.TrimSuffix(app.dataPath,"/state.json"),"0.10.4","org/demo")
+ if reloaded.config.Permissions==nil||len(reloaded.config.Permissions)!=0{
+  t.Fatal("empty role list was lost during reload")
+ }
+ if reloaded.isOperator(live.Event{Platform:"bilibili",Username:"legacy-admin"}){
+  t.Fatal("legacy admin powers resurrected after clearing structured list")
+ }
  bad:=consoleRequest(t,app,"POST","/api/permissions",map[string]any{"entries":[]map[string]any{
   {"id":"A","platform":"all","role":"super_admin"},
   {"id":"a","platform":"all","role":"admin"},
