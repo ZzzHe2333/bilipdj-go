@@ -88,6 +88,14 @@ func validateRoomListeners(c *Config) error{
    }
   }
  }
+ // Extra Bilibili rooms always require their own credential, even when
+ // the legacy primary room is disabled. Retain the historical primary-room
+ // anonymous mode only when it is the sole enabled Bilibili listener.
+ for _,p:=range c.Listeners {
+  if p.Platform=="bilibili"&&p.Enabled&&cookiePart(p.Cookie,"SESSDATA")==""{
+   return fmt.Errorf("新增 B站直播间 %s 必须配置对应 Cookie",p.ID)
+  }
+ }
  if biliEnabled>1 {
   for _,p:=range configuredListeners(*c) {
    if p.Platform=="bilibili"&&p.Enabled&&cookiePart(p.Cookie,"SESSDATA")=="" {
