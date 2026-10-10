@@ -109,6 +109,7 @@ type persisted struct {
 	GiftCredits         map[string]int         `json:"gift_credits,omitempty"`
 	GiftUsed            map[string]bool        `json:"gift_used,omitempty"`
 	GiftSeen            []string               `json:"gift_seen,omitempty"`
+	StyleSlots          map[string]map[string]any `json:"style_slots,omitempty"`
 	Style               map[string]any         `json:"style,omitempty"`
 	Appearance          map[string]any         `json:"appearance,omitempty"`
 }
@@ -127,6 +128,7 @@ type App struct {
 	giftUsed            map[string]bool
 	giftSeen            []string
 	giftLast            *live.Event
+	styleSlots          map[string]map[string]any
 	style               map[string]any
 	appearance          map[string]any
 	messages            []live.Event
@@ -166,7 +168,7 @@ func (a *App) SetInstallAction(f func(update.Downloaded) error) { a.installActio
 func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
 
 func New(dataDir, version, repo string) *App {
-	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a := &App{config: defaultConfig(), style: defaultStyle(), styleSlots: map[string]map[string]any{}, appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
 	a.performance = perf.New(dataDir)
 	a.autostart = autostart.New()
@@ -198,6 +200,7 @@ func New(dataDir, version, repo string) *App {
 				a.giftUsed = p.GiftUsed
 			}
 			a.giftSeen = p.GiftSeen
+			if p.StyleSlots!=nil {a.styleSlots=p.StyleSlots}
 			if a.config.GiftQueue == nil {
 				a.config.GiftQueue = defaultGiftSettings()
 			}
@@ -265,7 +268,7 @@ func (a *App) saveLocked() error {
 		savedQueue = nil
 		savedSlots = nil
 	}
-	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: savedQueue, QueueExternal: a.queuePath != "", Slots: savedSlots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
+	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: savedQueue, QueueExternal: a.queuePath != "", Slots: savedSlots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, StyleSlots: a.styleSlots, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}
