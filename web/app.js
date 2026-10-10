@@ -48,6 +48,56 @@ createApp({setup(){
 
  const obsURL=computed(()=>window.location.origin+'/index');
  const giftStatus=ref(null), giftNamesText=ref('');
+ const permissionRows=ref([]),permissionCaps=ref([]),permissionDirty=ref(false),permissionEditing=ref(false),permissionEditIndex=ref(-1),
+       permissionDraft=ref({id:'',platform:'all',role:'user',capabilities:[]});
+ const roleLabels={super_admin:'超级管理员',admin:'管理员',part_time:'兼职',user:'用户',blacklist:'黑名单'};
+ const scopeLabel=p=>({all:'B站、抖音',bilibili:'B站',douyin:'抖音'})[p]||p;
+ const roleLabel=p=>roleLabels[p]||p;
+ const capLabel=id=>({moderate:'拉黑/取消拉黑',queue:'队列管理',insert:'插队命令',switch:'排队开关',limits:'人数上限'})[id]||id;
+ async function loadPermissions(){
+  if(permissionDirty.value)return;
+  try{const result=await api('/api/permissions',{cache:'no-store'});permissionRows.value=result.entries||[];permissionCaps.value=result.capabilities||[]}
+  catch(e){message('读取权限失败：'+e.message,'error')}
+ }
+ function editPermission(index=-1){
+  permissionEditIndex.value=index;
+  const initial=index<0?{id:'',platform:'all',role:'user',capabilities:[]} : permissionRows.value[index];
+  permissionDraft.value={...initial,capabilities:[...(initial.capabilities||[])]};
+  permissionEditing.value=true;
+ }
+ function permissionRoleChanged(){
+  const p=permissionDraft.value;
+  if(p.role==='admin')p.capabilities=['moderate','queue','insert','switch','limits'];
+  else if(p.role==='part_time')p.capabilities=['queue'];
+  else p.capabilities=[];
+ }
+ function permissionCapToggle(cap,checked){
+  const p=permissionDraft.value;
+  p.capabilities=checked?[...new Set([...(p.capabilities||[]),cap])]:p.capabilities.filter(v=>v!==cap);
+ }
+ function confirmPermission(){
+  const d=permissionDraft.value;
+  d.id=(d.id||'').trim();
+  if(!d.id||d.id.length>60){message('请输入有效昵称（最多 60 字）','error');return}
+  if(permissionRows.value.some((p,i)=>i!==permissionEditIndex.value&&p.platform===d.platform&&p.id.toLowerCase()===d.id.toLowerCase())){
+   message('此平台已配置相同昵称','error');return
+  }
+  const items=[...permissionRows.value];
+  if(permissionEditIndex.value<0)items.push({...d,capabilities:[...(d.capabilities||[])]});
+  else items[permissionEditIndex.value]={...d,capabilities:[...(d.capabilities||[])]};
+  permissionRows.value=items;permissionDirty.value=true;permissionEditing.value=false;
+ }
+ function removePermission(index){if(!window.confirm('移除此条权限配置？需点击保存才生效。'))return;permissionRows.value=permissionRows.value.filter((_,i)=>i!==index);permissionDirty.value=true}
+ async function savePermissions(){
+  if(busy.value)return;
+  busy.value=true;
+  try{const result=await api('/api/permissions',{method:'POST',body:JSON.stringify({entries:permissionRows.value})});
+   permissionRows.value=result.entries||[];permissionDirty.value=false;message('权限列表已保存','success')}
+  catch(e){message('权限保存失败：'+e.message,'error')}
+  finally{busy.value=false}
+ }
+ watch(page,p=>{if(p==='permissions')void loadPermissions()});
+
  const qrImage=ref(''), qrState=ref(''), qrLink=ref('');let qrTimer=null, qrPolling=false;
  const legacyFile=ref(null), legacyPreview=ref(null), blacklistText=ref(''), adminsText=ref(''), superAdminsText=ref(''), guardsText=ref('');
  const listenerCookies=ref({}),qrInstanceId=ref('bilibili');
@@ -436,5 +486,5 @@ createApp({setup(){
  let autostartPoll=null;
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='settings'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
- return {activeChannelTab,styleSlot,styleSlots,previewOpen,previewPosition,previewPositionStyle,previewDragStart,previewDragMove,previewDragEnd,refreshStyleSlots,saveStyleSlot,previewStyleSlot,applyStyleSlot,queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {permissionRows,permissionCaps,permissionDirty,permissionEditing,permissionEditIndex,permissionDraft,roleLabel,scopeLabel,capLabel,loadPermissions,editPermission,permissionRoleChanged,permissionCapToggle,confirmPermission,removePermission,savePermissions,activeChannelTab,styleSlot,styleSlots,previewOpen,previewPosition,previewPositionStyle,previewDragStart,previewDragMove,previewDragEnd,refreshStyleSlots,saveStyleSlot,previewStyleSlot,applyStyleSlot,queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
