@@ -39,6 +39,7 @@ func readProcess()(c counters,err error){
    if strings.HasPrefix(l,"write_bytes:"){c.DiskWriteBytes,_=strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(l,"write_bytes:")),10,64);wr=true}
   }
   c.DiskAvailable=rd&&wr
+  c.DiskNote="Linux /proc/self/io 的物理层读写字节增量"
  }
  return c,nil
 }
