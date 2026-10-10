@@ -187,7 +187,7 @@ createApp({setup(){
   {id:'kuaishou',name:'快手直播',supported:false,placeholder:'快手房间号（预留）',description:'快手直播弹幕监听暂未接入。'},
   {id:'douyu',name:'斗鱼直播',supported:false,placeholder:'斗鱼房间号（预留）',description:'斗鱼直播弹幕监听暂未接入。'}
  ];
- const showPlatformPicker=ref(false),previousBiliEnabled=ref(false);
+ const activeChannelTab=ref('bilibili'),showPlatformPicker=ref(false),previousBiliEnabled=ref(false);
  const configuredPlatforms=computed(()=>platformCatalog.filter(p=>(config.value.visible_platforms||[]).includes(p.id)));
  const addablePlatforms=computed(()=>platformCatalog.filter(p=>!(config.value.visible_platforms||[]).includes(p.id)));
  const monitorPlatforms=computed(()=>configuredPlatforms.value.filter(p=>p.supported&&config.value[p.id]?.enabled));
@@ -198,12 +198,12 @@ createApp({setup(){
   const existing=config.value.listeners||[];
   if(existing.length>=30){message('额外直播间不能超过 30 个','error');return}
   const id=platform+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
-  config.value.listeners=[...existing,{id,platform,enabled:false,room:'',cookie:''}];
+  config.value.listeners=[...existing,{id,platform,enabled:false,room:'',cookie:''}];activeChannelTab.value=id;
   message('已添加直播间；填写后保存。B站需要分别配置 Cookie。','info');
  }
  function removeExtraListener(id){
   if(!window.confirm('移除此直播间？保存后停止监听并删除其 Cookie。'))return;
-  config.value.listeners=(config.value.listeners||[]).filter(v=>v.id!==id);
+  config.value.listeners=(config.value.listeners||[]).filter(v=>v.id!==id);if(activeChannelTab.value===id)activeChannelTab.value=platformCatalog.find(p=>configuredPlatforms.value.some(v=>v.id===p.id))?.id||'bilibili';
   if(qrInstanceId.value===id){stopQR();qrImage.value='';qrInstanceId.value='bilibili'}
   message('已标记移除，点击保存后生效','info');
  }
@@ -212,10 +212,10 @@ createApp({setup(){
  function addPlatform(id){if(!platformCatalog.some(p=>p.id===id))return;
   if(!config.value[id])config.value[id]={enabled:false,room:'',cookie:''};
   if(!(config.value.visible_platforms||[]).includes(id))config.value.visible_platforms=[...(config.value.visible_platforms||[]),id];
-  showPlatformPicker.value=false;
+  showPlatformPicker.value=false;activeChannelTab.value=id;
  }
  function removePlatform(id){if(config.value[id])config.value[id].enabled=false;
-  config.value.visible_platforms=(config.value.visible_platforms||[]).filter(x=>x!==id);
+  config.value.visible_platforms=(config.value.visible_platforms||[]).filter(x=>x!==id);if(activeChannelTab.value===id)activeChannelTab.value=platformCatalog.find(p=>configuredPlatforms.value.some(v=>v.id===p.id))?.id||'bilibili';
   if(id==='bilibili')stopQR();message('已移除平台；点击保存后停止监听','info');
  }
  function normalizeDouyinRoom(raw){const value=String(raw||'').trim();if(!value)return '';
@@ -436,5 +436,5 @@ createApp({setup(){
  let autostartPoll=null;
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='settings'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
- return {styleSlot,styleSlots,previewOpen,previewPosition,previewPositionStyle,previewDragStart,previewDragMove,previewDragEnd,refreshStyleSlots,saveStyleSlot,previewStyleSlot,applyStyleSlot,queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {activeChannelTab,styleSlot,styleSlots,previewOpen,previewPosition,previewPositionStyle,previewDragStart,previewDragMove,previewDragEnd,refreshStyleSlots,saveStyleSlot,previewStyleSlot,applyStyleSlot,queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
