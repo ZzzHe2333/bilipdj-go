@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ZzzHe2333/bilipdj-go/internal/autostart"
 	"github.com/ZzzHe2333/bilipdj-go/internal/live"
 	"github.com/ZzzHe2333/bilipdj-go/internal/perf"
 	"github.com/ZzzHe2333/bilipdj-go/internal/storage"
@@ -144,6 +145,7 @@ type App struct {
 	progressMu          sync.RWMutex
 	updateProgress      update.DownloadProgress
 	performance         *perf.Monitor
+	autostart           autostart.Controller
 	preparedUpdate      update.Downloaded
 	installAction       func(update.Downloaded) error
 	qrMu                sync.Mutex
@@ -157,10 +159,14 @@ type App struct {
 
 func (a *App) SetInstallAction(f func(update.Downloaded) error) { a.installAction = f }
 
+// SetAutostartController permits a fake OS startup service in HTTP tests.
+func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
+
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
 	a.performance = perf.New(dataDir)
+	a.autostart = autostart.New()
 	a.qrGenerateURL = biliQRGenerateEndpoint
 	a.qrPollURL = biliQRPollEndpoint
 	a.qrNavURL = biliNavEndpoint
@@ -553,6 +559,53 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		logs := append([]LogEntry{}, a.logs...)
 		a.mu.RUnlock()
 		send(w, 200, logs)
+	})
+	// Read OS state every time: Web panel and Windows tray share one source of truth.
+	mux.HandleFunc("GET /api/autostart", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		state, err := a.autostart.Status()
+		if err != nil {
+			send(w, 500, map[string]string{"error": "读取开机自启状态失败：" + err.Error()})
+			return
+		}
+		send(w, 200, state)
+	})
+	mux.HandleFunc("POST /api/autostart", func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(r) {
+			send(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		var request struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if err := decode(r, &request); err != nil || request.Enabled == nil {
+			send(w, 400, map[string]string{"error": "enabled 必须为布尔值"})
+			return
+		}
+		state, err := a.autostart.Status()
+		if err != nil {
+			send(w, 500, map[string]string{"error": "读取开机自启状态失败：" + err.Error()})
+			return
+		}
+		if !state.Supported {
+			send(w, 409, map[string]string{"error": "当前环境不支持登录自启；Docker 请配置 restart 策略"})
+			return
+		}
+		if err = a.autostart.Set(*request.Enabled); err != nil {
+			send(w, 500, map[string]string{"error": "开机自启设置失败：" + err.Error()})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		after, err := a.autostart.Status()
+		if err != nil {
+			send(w, 500, map[string]string{"error": "设置已写入但重新读取状态失败：" + err.Error()})
+			return
+		}
+		send(w, 200, after)
 	})
 	mux.HandleFunc("GET /api/onboarding", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {

@@ -144,3 +144,12 @@
 
 /* Brand icon: native SVG keeps edges crisp and avoids the placeholder letter B. */
 .logo.logo-image{display:block;flex:none;object-fit:contain;width:35px;height:35px;border-radius:10px;background:transparent;box-shadow:0 6px 20px #050b1859}
+
+/* Login autostart is an explicit OS-level preference, not a queue config. */
+.autostart-panel{display:grid;gap:10px;margin-bottom:20px;padding:20px 24px}
+.autostart-panel h2{margin:0 0 5px}
+.autostart-panel .tip{margin:0}
+.autostart-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.autostart-actions .check{margin:0;display:inline-flex;align-items:center;gap:9px;cursor:pointer}
+.autostart-actions .check input{accent-color:var(--cyan);width:17px;height:17px}
+.autostart-error{color:var(--red)!important}

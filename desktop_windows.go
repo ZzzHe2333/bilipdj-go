@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"syscall"
 	"unsafe"
+
+	"github.com/ZzzHe2333/bilipdj-go/internal/autostart"
 )
 
 // The Windows release uses -H=windowsgui: no console window is created.
@@ -60,6 +62,9 @@ const (
 	nifTip          = 4
 	menuOpen        = 1001
 	menuQuit        = 1002
+	menuAutostart   = 1003
+	menuChecked     = 0x0008
+	menuDisabled    = 0x0001
 )
 
 type winClass struct {
@@ -205,11 +210,23 @@ func trayWindowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 				defer procDestroyMenu.Call(menu)
 				open := wide("打开 Web 管理界面")
 				exit := wide("退出 BiliPDJ Go")
+				startupText := wide("开机自启（登录后启动）")
+				manager := autostart.New()
+				startupState, startupErr := manager.Status()
+				var startupFlags uintptr
+				if startupErr != nil || !startupState.Supported {
+					startupFlags = menuDisabled
+					if startupErr != nil { log.Printf("startup menu status failed: %v", startupErr) }
+				} else if startupState.Enabled {
+					startupFlags = menuChecked
+				}
 				procAppendMenu.Call(menu, 0, menuOpen, uintptr(unsafe.Pointer(open)))
+				procAppendMenu.Call(menu, startupFlags, menuAutostart, uintptr(unsafe.Pointer(startupText)))
 				procAppendMenu.Call(menu, 0x800, 0, 0) // separator
 				procAppendMenu.Call(menu, 0, menuQuit, uintptr(unsafe.Pointer(exit)))
 				runtime.KeepAlive(open)
 				runtime.KeepAlive(exit)
+				runtime.KeepAlive(startupText)
 				var point winPoint
 				procGetCursor.Call(uintptr(unsafe.Pointer(&point)))
 				procSetForeground.Call(hwnd)
@@ -217,6 +234,13 @@ func trayWindowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 				switch action {
 				case menuOpen:
 					openDesktopURL(state.url)
+				case menuAutostart:
+					if startupErr == nil && startupState.Supported {
+						if err := manager.Set(!startupState.Enabled); err != nil {
+							log.Printf("failed to toggle login startup: %v", err)
+							desktopError("开机自启设置失败：\n" + err.Error())
+						}
+					}
 				case menuQuit:
 					state.quit()
 				}
