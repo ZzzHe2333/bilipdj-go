@@ -63,7 +63,7 @@
   <button class="btn small" type="button" :disabled="perfInterval===0||perfLoading" @click="refreshPerfNow">立即检测</button>
  </section>
  <section class="panel log-footer-panel"><strong>指标含义及局限</strong>
-  <p class="tip">CPU 进程占用按所有逻辑处理器归一化，整机 CPU 单独展示；内存以进程 RSS/工作集为准，macOS 可能只有峰值 RSS。数据目录占用最多每 60 秒扫描一次；磁盘读写为字节速率，Windows 进程 I/O 可能包含缓存或其他设备 I/O。网络为整机/容器网络接口，不是本项目独占用量。NPU/GPU 未接入可信的跨平台进程级计数器时显示不可用，不等于 0%。关闭检测后既不轮询接口，也不后台刷新。</p>
+  <p class="tip">仅统计七项本项目指标：进程 CPU、进程内存、Go 数据目录、进程磁盘读写速率、项目安装文件大小和 Go 排队存档大小。项目文件占用仅统计当前可执行文件及同目录发行包配套资源，不统计同目录其他软件；存档大小使用实际 Go 存档目录（Windows 通常在 LocalAppData），不包括 Python 版。若便携版的存档目录位于数据目录内部，数据目录总量会包含存档，两项不可直接相加。三项磁盘空间大小最多每 60 秒更新；磁盘 I/O 是进程读写计数器增量，Windows 可能包含缓存/设备 I/O。关闭检测后不会请求或后台采样。</p>
  </section>
 </template>
 <template v-else-if="page==='queue'">
