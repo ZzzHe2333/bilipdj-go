@@ -460,8 +460,9 @@ func send(w http.ResponseWriter, code int, v any) {
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
-func decode(r *http.Request, dest any) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, 16<<10)
+func decode(r *http.Request, dest any) error { return decodeLimit(r,dest,16<<10) }
+func decodeLimit(r *http.Request, dest any, limit int64) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, limit)
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -760,7 +761,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		var cfg Config
-		if e := decode(r, &cfg); e != nil {
+		if e := decodeLimit(r, &cfg, 512<<10); e != nil {
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
