@@ -73,6 +73,12 @@ func TestRoomConfigSecretsAndImmutableCookieIDs(t *testing.T) {
  byID:=map[string]string{}
  for _,p:=range a.config.Listeners{byID[p.ID]=p.Cookie}
  if byID["bilibili-room-one"]!="SESSDATA=room-one-secret"||byID["bilibili-room-two"]!="SESSDATA=room-two-secret"{t.Fatal("cookie was reassigned to wrong room")}
+ // A legacy client omitting the new field must not delete extra rooms.
+ legacy:=cfg
+ legacy.Listeners=nil
+ data,_=json.Marshal(legacy)
+ result=request("POST",data)
+ if result.Code!=200||len(a.config.Listeners)!=2{t.Fatalf("older config client unexpectedly removed rooms: %d",result.Code)}
  cfg.Listeners=cfg.Listeners[:1]
  data,_=json.Marshal(cfg)
  result=request("POST",data)
@@ -85,6 +91,7 @@ func TestRoomConfigSecretsAndImmutableCookieIDs(t *testing.T) {
 type fakeRoomSource struct {
  mu sync.Mutex
  connections []string
+ canceled []string
 }
 func (f *fakeRoomSource) Run(ctx context.Context, room, cookie string,emit live.Emit,report live.Report){
  f.mu.Lock()
@@ -93,6 +100,9 @@ func (f *fakeRoomSource) Run(ctx context.Context, room, cookie string,emit live.
  report(live.Status{Connected:true,Message:"connected",Since:time.Now()})
  emit(live.Event{UserID:"42",Username:"viewer",Content:"排队",Time:time.Now()})
  <-ctx.Done()
+ f.mu.Lock()
+ f.canceled=append(f.canceled,room)
+ f.mu.Unlock()
 }
 func TestMultipleWorkersShareQueueAndStatusKeys(t *testing.T){
  a:=New(t.TempDir(),"0.10.4","org/repo")
@@ -122,4 +132,32 @@ func TestMultipleWorkersShareQueueAndStatusKeys(t *testing.T){
  if len(a.statuses)!=4{t.Fatalf("expected four distinct instance statuses, got %+v",a.statuses)}
  if len(a.workers)!=4{t.Fatalf("expected independent workers, got %d",len(a.workers))}
  if a.queue[0].Platform==a.queue[1].Platform{t.Fatal("distinct platforms not kept distinct")}
+}
+
+// Refreshing a single credential must NOT cancel all of the other streams.
+func TestTargetedListenerRefreshDoesNotReconnectOtherRooms(t *testing.T){
+ app:=New(t.TempDir(),"0.10.4","org/repo")
+ source:=&fakeRoomSource{}
+ app.listenerFactory=func(string)live.Source{return source}
+ c:=defaultConfig()
+ c.Bilibili=PlatformConfig{Enabled:true,Room:"123",Cookie:"SESSDATA=abc"}
+ c.Listeners=[]ListenerConfig{extraRoom("bilibili-second","bilibili","456","SESSDATA=def",true)}
+ app.config=c
+ app.Start()
+ defer app.Stop()
+ limit:=time.Now().Add(time.Second)
+ for time.Now().Before(limit){
+  source.mu.Lock();count:=len(source.connections);source.mu.Unlock()
+  if count==2{break};time.Sleep(5*time.Millisecond)
+ }
+ app.refreshListener("bilibili-second")
+ limit=time.Now().Add(time.Second)
+ for time.Now().Before(limit){
+  source.mu.Lock();runs:=len(source.connections);stopped:=len(source.canceled);source.mu.Unlock()
+  if runs==3&&stopped==1{break};time.Sleep(5*time.Millisecond)
+ }
+ source.mu.Lock()
+ defer source.mu.Unlock()
+ if len(source.connections)!=3{t.Fatalf("expected three total runs, got %v",source.connections)}
+ if len(source.canceled)!=1||source.canceled[0]!="456"{t.Fatalf("unrelated room was disconnected: %v",source.canceled)}
 }
