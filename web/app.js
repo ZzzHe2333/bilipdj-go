@@ -6,8 +6,98 @@ createApp({setup(){
  const autostart=ref({supported:false,enabled:false,note:'正在检测系统登录启动项…'}),autostartLoading=ref(false),autostartBusy=ref(false),autostartError=ref('');
  const config=ref({listeners:[],bilibili:{room:'',cookie:'',enabled:false},douyin:{room:'',cookie:'',enabled:false},auto_queue:true,command:'排队',gift_queue:{enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false}});
  const obsStyle=ref({transparent_background:true}),obsPreviewFrame=ref(null),obsPreviewBackdrop=ref('checker');
+ const styleSlot=ref(1),styleSlots=ref([]),previewOpen=ref(true),previewPosition=ref({x:80,y:130});
+ const previewPositionStyle=computed(()=>({left:previewPosition.value.x+'px',top:previewPosition.value.y+'px'}));
+ let dragOffset=null;
+ function previewDragStart(e){
+  if(e.button!==0)return;
+  const rect=e.currentTarget.parentElement.getBoundingClientRect();
+  dragOffset={x:e.clientX-rect.left,y:e.clientY-rect.top};
+  e.currentTarget.setPointerCapture(e.pointerId);
+ }
+ function previewDragMove(e){
+  if(!dragOffset)return;
+  const box=e.currentTarget.parentElement;
+  previewPosition.value={x:Math.max(0,Math.min(window.innerWidth-box.offsetWidth,e.clientX-dragOffset.x)),
+    y:Math.max(0,Math.min(window.innerHeight-box.offsetHeight,e.clientY-dragOffset.y))};
+ }
+ function previewDragEnd(){dragOffset=null}
+ async function refreshStyleSlots(){
+  try{styleSlots.value=await api('/api/style/slots',{cache:'no-store'})}
+  catch(e){message('读取样式槽位失败：'+e.message,'error')}
+ }
+ async function saveStyleSlot(){
+  busy.value=true;
+  try{await api('/api/style/slots/'+styleSlot.value,{method:'POST',body:JSON.stringify(obsStyle.value)});
+   await refreshStyleSlots();message('已保存样式存档 '+styleSlot.value,'success')
+  }catch(e){message(e.message,'error')}finally{busy.value=false}
+ }
+ async function previewStyleSlot(){
+  try{const v=await api('/api/style/slots/'+styleSlot.value,{cache:'no-store'});
+   obsStyle.value={...v.style};message('已载入样式存档 '+styleSlot.value+'，尚未应用到 OBS','success')
+  }catch(e){message(e.message,'error')}
+ }
+ async function applyStyleSlot(){
+  if(!window.confirm('将样式存档 '+styleSlot.value+' 应用到 OBS 展示？'))return;
+  busy.value=true;
+  try{const v=await api('/api/style/slots/'+styleSlot.value+'/apply',{method:'POST',body:'{}'});
+   obsStyle.value={...v.style};message('OBS 已使用样式存档 '+styleSlot.value,'success')
+  }catch(e){message(e.message,'error')}finally{busy.value=false}
+ }
+ watch(page,p=>{if(p==='overlay'){previewOpen.value=true;void refreshStyleSlots()}});
+
  const obsURL=computed(()=>window.location.origin+'/index');
  const giftStatus=ref(null), giftNamesText=ref('');
+ const permissionRows=ref([]),permissionCaps=ref([]),permissionDirty=ref(false),permissionEditing=ref(false),permissionEditIndex=ref(-1),
+       permissionDraft=ref({id:'',platform:'all',role:'user',capabilities:[]});
+ const roleLabels={super_admin:'超级管理员',admin:'管理员',part_time:'兼职',user:'用户',blacklist:'黑名单'};
+ const scopeLabel=p=>({all:'B站、抖音',bilibili:'B站',douyin:'抖音'})[p]||p;
+ const roleLabel=p=>roleLabels[p]||p;
+ const capLabel=id=>({moderate:'拉黑/取消拉黑',queue:'队列管理',insert:'插队命令',switch:'排队开关',limits:'人数上限',guard_insert:'舰长插队资格'})[id]||id;
+ async function loadPermissions(){
+  if(permissionDirty.value)return;
+  try{const result=await api('/api/permissions',{cache:'no-store'});permissionRows.value=result.entries||[];permissionCaps.value=result.capabilities||[]}
+  catch(e){message('读取权限失败：'+e.message,'error')}
+ }
+ function editPermission(index=-1){
+  permissionEditIndex.value=index;
+  const initial=index<0?{id:'',platform:'all',role:'user',capabilities:[]} : permissionRows.value[index];
+  permissionDraft.value={...initial,capabilities:[...(initial.capabilities||[])]};
+  permissionEditing.value=true;
+ }
+ function permissionRoleChanged(){
+  const p=permissionDraft.value;
+  if(p.role==='admin')p.capabilities=['moderate','queue','insert','switch','limits'];
+  else if(p.role==='part_time')p.capabilities=['queue'];
+  else p.capabilities=[];
+ }
+ function permissionCapToggle(cap,checked){
+  const p=permissionDraft.value;
+  p.capabilities=checked?[...new Set([...(p.capabilities||[]),cap])]:p.capabilities.filter(v=>v!==cap);
+ }
+ function confirmPermission(){
+  const d=permissionDraft.value;
+  d.id=(d.id||'').trim();
+  if(!d.id||d.id.length>60){message('请输入有效昵称（最多 60 字）','error');return}
+  if(permissionRows.value.some((p,i)=>i!==permissionEditIndex.value&&p.platform===d.platform&&p.id.toLowerCase()===d.id.toLowerCase())){
+   message('此平台已配置相同昵称','error');return
+  }
+  const items=[...permissionRows.value];
+  if(permissionEditIndex.value<0)items.push({...d,capabilities:[...(d.capabilities||[])]});
+  else items[permissionEditIndex.value]={...d,capabilities:[...(d.capabilities||[])]};
+  permissionRows.value=items;permissionDirty.value=true;permissionEditing.value=false;
+ }
+ function removePermission(index){if(!window.confirm('移除此条权限配置？需点击保存才生效。'))return;permissionRows.value=permissionRows.value.filter((_,i)=>i!==index);permissionDirty.value=true}
+ async function savePermissions(){
+  if(busy.value)return;
+  busy.value=true;
+  try{const result=await api('/api/permissions',{method:'POST',body:JSON.stringify({entries:permissionRows.value})});
+   permissionRows.value=result.entries||[];permissionDirty.value=false;message('权限列表已保存','success')}
+  catch(e){message('权限保存失败：'+e.message,'error')}
+  finally{busy.value=false}
+ }
+ watch(page,p=>{if(p==='permissions')void loadPermissions()});
+
  const qrImage=ref(''), qrState=ref(''), qrLink=ref('');let qrTimer=null, qrPolling=false;
  const legacyFile=ref(null), legacyPreview=ref(null), blacklistText=ref(''), adminsText=ref(''), superAdminsText=ref(''), guardsText=ref('');
  const listenerCookies=ref({}),qrInstanceId=ref('bilibili');
@@ -15,6 +105,44 @@ createApp({setup(){
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
+ const queueEditing=ref(false),queueEditKey=ref(''),queueEditSlot=ref(0),queueEditName=ref(''),queueEditNote=ref(''),queueEditSource=ref('');
+ const queueEditManual=computed(()=>{const q=queue.value.find(v=>v.key===queueEditKey.value);return !!q&&q.platform==='manual'&&/^(manual|admin):/.test(q.key)});
+ const sorting=ref(false),sortKeys=ref([]),sortBefore=ref([]),draggingKey=ref('');
+ const sortedQueue=computed(()=>sorting.value?sortKeys.value.map(k=>queue.value.find(q=>q.key===k)).filter(Boolean):queue.value);
+ function beginSorting(){if(busy.value)return;queueSearch.value='';sortBefore.value=queue.value.map(q=>q.key);sortKeys.value=[...sortBefore.value];sorting.value=true}
+ function cancelSorting(){sorting.value=false;sortKeys.value=[];sortBefore.value=[];draggingKey.value=''}
+ function sortStart(event,key){if(!sorting.value)return;draggingKey.value=key;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',key)}
+ function sortDrop(event,target){if(!sorting.value)return;event.preventDefault();const from=sortKeys.value.indexOf(draggingKey.value),to=sortKeys.value.indexOf(target);if(from<0||to<0||from===to)return;const n=[...sortKeys.value];n.splice(to,0,n.splice(from,1)[0]);sortKeys.value=n}
+ function sortOver(event){if(sorting.value)event.preventDefault()}
+ async function saveSorting(){
+  if(busy.value||!sorting.value)return;
+  busy.value=true;
+  try{
+   queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value,slot:Number(selectedSlot.value)})});
+   cancelSorting();message('已保存新的排队顺序','success');
+  }catch(e){message('排序未保存：'+e.message,'error');await refresh()}
+  finally{busy.value=false}
+ }
+ function openQueueEditor(q){
+  if(!q||sorting.value)return;
+  queueEditKey.value=q.key;queueEditSlot.value=Number(selectedSlot.value);selectedKey.value=q.key;
+  queueEditName.value=q.username||'';queueEditNote.value=q.note||'';
+  queueEditSource.value=q.platform==='manual'?q.source_platform||'':q.platform;
+  queueEditing.value=true;
+ }
+ async function saveQueueEditor(){
+  if(busy.value)return;
+  if(queueEditSlot.value!==Number(selectedSlot.value)){queueEditing.value=false;message('排队存档已切换，请重新编辑','error');return}
+  const q=queue.value.find(v=>v.key===queueEditKey.value);
+  if(!q){queueEditing.value=false;message('成员已变动，请刷新','error');return}
+  const payload={action:'edit',key:q.key,note:queueEditNote.value};
+  if(queueEditManual.value){payload.new_name=queueEditName.value.trim();payload.source_platform=queueEditSource.value}
+  busy.value=true;
+  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(payload)});queueEditing.value=false;message('排队信息已保存','success')}
+  catch(e){message(e.message,'error')}
+  finally{busy.value=false}
+ }
+
  const versions=ref([]),selectedVersion=ref(''),versionsError=ref(''),downloadProgress=ref(null),downloading=ref(false);
  const selectedRelease=computed(()=>versions.value.find(v=>v.version===selectedVersion.value)||null);
  const targetSize=computed(()=>selectedRelease.value?.size||release.value?.size||0);
@@ -110,7 +238,7 @@ createApp({setup(){
   {id:'kuaishou',name:'快手直播',supported:false,placeholder:'快手房间号（预留）',description:'快手直播弹幕监听暂未接入。'},
   {id:'douyu',name:'斗鱼直播',supported:false,placeholder:'斗鱼房间号（预留）',description:'斗鱼直播弹幕监听暂未接入。'}
  ];
- const showPlatformPicker=ref(false),previousBiliEnabled=ref(false);
+ const activeChannelTab=ref('bilibili'),showPlatformPicker=ref(false),previousBiliEnabled=ref(false);
  const configuredPlatforms=computed(()=>platformCatalog.filter(p=>(config.value.visible_platforms||[]).includes(p.id)));
  const addablePlatforms=computed(()=>platformCatalog.filter(p=>!(config.value.visible_platforms||[]).includes(p.id)));
  const monitorPlatforms=computed(()=>configuredPlatforms.value.filter(p=>p.supported&&config.value[p.id]?.enabled));
@@ -121,12 +249,12 @@ createApp({setup(){
   const existing=config.value.listeners||[];
   if(existing.length>=30){message('额外直播间不能超过 30 个','error');return}
   const id=platform+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
-  config.value.listeners=[...existing,{id,platform,enabled:false,room:'',cookie:''}];
+  config.value.listeners=[...existing,{id,platform,enabled:false,room:'',cookie:''}];activeChannelTab.value=id;
   message('已添加直播间；填写后保存。B站需要分别配置 Cookie。','info');
  }
  function removeExtraListener(id){
   if(!window.confirm('移除此直播间？保存后停止监听并删除其 Cookie。'))return;
-  config.value.listeners=(config.value.listeners||[]).filter(v=>v.id!==id);
+  config.value.listeners=(config.value.listeners||[]).filter(v=>v.id!==id);if(activeChannelTab.value===id)activeChannelTab.value=platformCatalog.find(p=>configuredPlatforms.value.some(v=>v.id===p.id))?.id||'bilibili';
   if(qrInstanceId.value===id){stopQR();qrImage.value='';qrInstanceId.value='bilibili'}
   message('已标记移除，点击保存后生效','info');
  }
@@ -135,10 +263,10 @@ createApp({setup(){
  function addPlatform(id){if(!platformCatalog.some(p=>p.id===id))return;
   if(!config.value[id])config.value[id]={enabled:false,room:'',cookie:''};
   if(!(config.value.visible_platforms||[]).includes(id))config.value.visible_platforms=[...(config.value.visible_platforms||[]),id];
-  showPlatformPicker.value=false;
+  showPlatformPicker.value=false;activeChannelTab.value=id;
  }
  function removePlatform(id){if(config.value[id])config.value[id].enabled=false;
-  config.value.visible_platforms=(config.value.visible_platforms||[]).filter(x=>x!==id);
+  config.value.visible_platforms=(config.value.visible_platforms||[]).filter(x=>x!==id);if(activeChannelTab.value===id)activeChannelTab.value=platformCatalog.find(p=>configuredPlatforms.value.some(v=>v.id===p.id))?.id||'bilibili';
   if(id==='bilibili')stopQR();message('已移除平台；点击保存后停止监听','info');
  }
  function normalizeDouyinRoom(raw){const value=String(raw||'').trim();if(!value)return '';
@@ -159,7 +287,7 @@ createApp({setup(){
  const queueSourceLabel=q=>q.platform==='manual'?platformName(q.source_platform):platformName(q.platform);
  const logOrder={DEBUG:0,INFO:1,WARNING:2,ERROR:3,CRITICAL:4};
  const filteredLogs=computed(()=>logs.value.filter(l=>(logLevel.value==='ALL'||logOrder[l.level]>=logOrder[logLevel.value])&&(logCategory.value==='all'||l.category===logCategory.value)&&(!logSearch.value||`${l.level} ${l.category} ${l.message}`.toLowerCase().includes(logSearch.value.toLowerCase()))));
- const visibleQueue=computed(()=>queue.value.filter(q=>!queueSearch.value||`${q.username} ${q.note} ${q.mode} ${q.platform} ${q.source_platform||''} ${q.user_id}`.toLowerCase().includes(queueSearch.value.toLowerCase())));
+ const visibleQueue=computed(()=>sortedQueue.value.filter(q=>!queueSearch.value||`${q.username} ${q.note} ${q.mode} ${q.platform} ${q.source_platform||''} ${q.user_id}`.toLowerCase().includes(queueSearch.value.toLowerCase())));
  const selectedIndex=computed(()=>queue.value.findIndex(q=>q.key===selectedKey.value));
  const connectedCount=computed(()=>[...monitorPlatforms.value,...extraMonitorPlatforms.value].filter(p=>statuses.value[p.instanceId||p.id]?.connected).length);
  const filteredMessages=computed(()=>[...messages.value].reverse().filter(m=>filter.value==='all'||filter.value===m.platform));
@@ -195,7 +323,7 @@ createApp({setup(){
    await loadAutostart();
   }
  }
- watch(page,p=>{if(p==='settings')void loadAutostart()});
+ watch(page,p=>{if(p==='system')void loadAutostart()});
 
  function appendLog(entry){if(!entry||!entry.id)return;if(logs.value.some(l=>l.id===entry.id))return;logs.value.push(entry);logs.value.sort((a,b)=>a.id-b.id);if(logs.value.length>500)logs.value.splice(0,logs.value.length-500)}
  async function refreshLogs(){try{const data=await api('/api/logs');for(const e of data)appendLog(e)}catch(e){message('读取日志失败：'+e.message,'error')}}
@@ -206,7 +334,7 @@ createApp({setup(){
  watch([filteredLogs,autoScroll],()=>{if(autoScroll.value)nextTick(()=>{const el=logListRef.value;if(el)el.scrollTop=el.scrollHeight})},{flush:'post'});
  async function refresh(){try{const [s,q,m,slots]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages'),api('/api/queue/slots')]);status.value=s;queue.value=q;messages.value=m;slotInfo.value=slots;selectedSlot.value=slots.active_slot}catch(e){message(e.message,'error')}}
  async function loadAppearance(){try{const appearance=await api('/api/appearance');const mode=appearance.mode==='light'?'light':'dark';const colors=appearance[mode]||{};const root=document.documentElement;const mapping={'--bg':'background','--panel':'surface','--panel2':'surface_alt','--line':'border','--text':'text','--dim':'muted','--accent':'accent'};for(const [css,k] of Object.entries(mapping)){const value=colors[k];if(typeof value==='string' && /^#[0-9a-fA-F]{3,8}$/.test(value))root.style.setProperty(css,value)}root.style.colorScheme=mode}catch{}}
- async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!Array.isArray(config.value.listeners))config.value.listeners=[];listenerCookies.value=d.listener_cookies||{};previousBiliEnabled.value=!!config.value.bilibili?.enabled;if(!Array.isArray(config.value.visible_platforms))config.value.visible_platforms=platformCatalog.filter(p=>config.value[p.id]?.enabled).map(p=>p.id);if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
+ async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!Array.isArray(config.value.listeners))config.value.listeners=[];listenerCookies.value=d.listener_cookies||{};previousBiliEnabled.value=!!config.value.bilibili?.enabled;if(!Array.isArray(config.value.visible_platforms))config.value.visible_platforms=platformCatalog.filter(p=>config.value[p.id]?.enabled).map(p=>p.id);if(![...config.value.visible_platforms,...config.value.listeners.map(v=>v.id)].includes(activeChannelTab.value))activeChannelTab.value=config.value.visible_platforms[0]||config.value.listeners[0]?.id||'bilibili';if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
  async function saveConfig(){busy.value=true;try{if(config.value.douyin?.room)config.value.douyin.room=normalizeDouyinRoom(config.value.douyin.room);for(const p of (config.value.listeners||[])){if(p.platform==='douyin'&&p.room)p.room=normalizeDouyinRoom(p.room)}if(config.value.bilibili?.enabled&&!cookieConfigured.value.bilibili&&!String(config.value.bilibili.cookie||'').trim()&&!previousBiliEnabled.value)throw Error('请先扫码登录 B站，再开启弹幕监听');config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
  async function loadGiftStatus(){try{giftStatus.value=await api('/api/gifts/state')}catch(e){message(e.message,'error')}}
  async function loadObsStyle(){
@@ -229,14 +357,14 @@ createApp({setup(){
  }
  async function saveObsStyle(){busy.value=true;try{await api('/api/style',{method:'POST',body:JSON.stringify(obsStyle.value)});message('OBS 样式已保存','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
  async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(body)});if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value=''}catch(e){message(e.message,'error')}}
- async function changeSlot(){try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
+ async function changeSlot(){cancelSorting();queueEditing.value=false;try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
  async function insertQueue(){if(!newName.value)return;const name=newName.value;const index=selectedIndex.value<0?0:selectedIndex.value+1;await queueAction({action:'insert',name,index});newName.value=''}
  async function moveSelected(delta){if(selectedIndex.value<0)return;await moveQueue(queue.value[selectedIndex.value],selectedIndex.value+delta)}
  async function editSelected(){if(selectedIndex.value<0)return;await editQueue(queue.value[selectedIndex.value])}
  async function removeSelected(){if(selectedIndex.value<0)return;const q=queue.value[selectedIndex.value];if(window.confirm('确认移除 '+q.username+'？'))await removeQueue(q.key)}
  async function completeFirst(){if(!queue.value.length)return;if(window.confirm('确认完成并移除队首 '+queue.value[0].username+'？'))await queueAction({action:'remove',key:queue.value[0].key})}
  async function moveQueue(q,index){await queueAction({action:'move',key:q.key,index:index})}
- async function editQueue(q){const note=window.prompt('修改 '+q.username+' 的备注',q.note||'');if(note!==null)await queueAction({action:'edit',key:q.key,note})}
+ async function editQueue(q){openQueueEditor(q)}
  async function addQueue(){if(!newName.value)return;await queueAction({action:'add',name:newName.value});newName.value=''}
  function removeQueue(key){queueAction({action:'remove',key})}
  function clearQueue(){if(window.confirm('确认清空当前全部排队？'))queueAction({action:'clear'})}
@@ -357,7 +485,7 @@ createApp({setup(){
  async function exportPythonQueue(){try{const headers={};const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;const resp=await fetch('/api/storage/queue-export?slot='+Number(selectedSlot.value),{headers});if(!resp.ok)throw Error('HTTP '+resp.status);const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='queue_archive_slot_'+selectedSlot.value+'.csv';a.click();URL.revokeObjectURL(url)}catch(e){message('导出失败：'+e.message,'error')}}
  function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.instance_id||event.data.platform]:event.data}}}catch{}}}
  let autostartPoll=null;
- onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='settings'&&!document.hidden)void loadAutostart()},5000)});
+ onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='system'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
- return {listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {permissionRows,permissionCaps,permissionDirty,permissionEditing,permissionEditIndex,permissionDraft,roleLabel,scopeLabel,capLabel,loadPermissions,editPermission,permissionRoleChanged,permissionCapToggle,confirmPermission,removePermission,savePermissions,activeChannelTab,styleSlot,styleSlots,previewOpen,previewPosition,previewPositionStyle,previewDragStart,previewDragMove,previewDragEnd,refreshStyleSlots,saveStyleSlot,previewStyleSlot,applyStyleSlot,queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');

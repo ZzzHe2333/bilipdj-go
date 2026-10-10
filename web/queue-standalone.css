@@ -131,3 +131,13 @@
 .queue-dialog-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
 .queue-dialog-actions .btn{min-height:45px}
 @media(max-width:430px){.queue-dialog-backdrop{align-items:center;padding:10px}.queue-edit-dialog{width:100%;padding:18px}.queue-dialog-actions .btn{flex:1}}
+
+/* Compact, editable queue rows also in the standalone control page. */
+.queue-shell{padding:clamp(10px,1.4vw,18px)}
+.queue-page .queue-table td,.queue-page .queue-table th{padding:7px 9px}
+.queue-page .queue-page-header{margin-bottom:12px}
+.queue-page .queue-main{padding:14px}
+.queue-page .queue-toolbar{gap:10px}
+.queue-page .queue-actions{gap:7px}
+.queue-page tr.sort-grab{cursor:grab}
+.queue-page tr.sort-dragging{opacity:.4}

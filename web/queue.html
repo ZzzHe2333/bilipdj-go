@@ -18,7 +18,7 @@
     <span class="connection" :class="{online:streamReady}">{{streamReady?'实时同步':'轮询同步'}}</span>
     <a class="btn small" href="/" rel="noopener">返回主控制台</a>
     <button class="btn small" type="button" @click="needsAuth=!needsAuth">管理授权</button>
-    <button class="btn small" type="button" @click="refresh" :disabled="busy">刷新</button>
+    <button class="btn small" type="button" @click="refresh" :disabled="busy">刷新</button><button class="btn primary small" type="button" :disabled="busy" @click="sorting?saveSorting():beginSorting()">{{sorting?'保存排序':'排序'}}</button><button v-if="sorting" class="btn small" @click="cancelSorting">取消</button>
    </nav>
   </header>
   <main>
@@ -45,7 +45,7 @@
       </select>
      </label>
      <label for="queue-search" class="search-field">筛选用户
-      <input id="queue-search" v-model.trim="search" type="search" placeholder="用户名、备注、平台或用户 ID">
+      <input id="queue-search" v-model.trim="search" :disabled="sorting" type="search" placeholder="用户名、备注、平台或用户 ID">
      </label>
      <p class="tip">切换槽位会同步影响主控制台和 OBS，不会产生隐藏存档。</p>
     </div>
@@ -57,18 +57,18 @@
       <button class="btn" type="button" @click="insertQueue" :disabled="busy||!newName">在选中项下方新增</button>
      </div>
     </form>
-    <div class="queue-list-title"><h2>排队列表</h2><span class="tip">显示 {{visibleQueue.length}} / {{queue.length}} 人，点击任意成员可选中操作</span></div>
+    <div class="queue-list-title"><h2>排队列表</h2><span class="tip">显示 {{visibleQueue.length}} / {{queue.length}} 人，双击条目可弹窗编辑，点击排序后拖动并保存</span></div>
     <div class="desktop-table">
      <table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>
      <tbody>
-      <tr v-for="q in visibleQueue" :key="q.key" tabindex="0" role="button" :aria-selected="selectedKey===q.key" :class="{chosen:selectedKey===q.key}" @click="selectItem(q.key)" @keydown.enter.prevent="selectItem(q.key)" @keydown.space.prevent="selectItem(q.key)">
-       <td><b>{{position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
+      <tr v-for="(q,i) in visibleQueue" :key="q.key" tabindex="0" role="button" @dblclick.stop="startEditing(q.key)" :draggable="sorting" @dragstart="dragStart($event,q.key)" @dragover="dragOver($event)" @drop="dragDrop($event,q.key)" @dragend="dragging=''" :aria-selected="selectedKey===q.key" :class="{chosen:selectedKey===q.key,'sort-grab':sorting,'sort-dragging':dragging===q.key}" @click="selectItem(q.key)" @keydown.enter.prevent="selectItem(q.key)" @keydown.space.prevent="selectItem(q.key)">
+       <td><b>{{sorting?i+1:position(q.key)}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{timeOf(q.at)}}</td>
       </tr><tr v-if="!visibleQueue.length"><td colspan="6" class="empty">暂无符合条件的成员</td></tr>
      </tbody></table>
     </div>
     <ol class="mobile-list" aria-label="队列成员">
      <li v-for="q in visibleQueue" :key="q.key">
-      <button type="button" class="member-card" :class="{chosen:selectedKey===q.key}" :aria-pressed="selectedKey===q.key" @click="selectItem(q.key)">
+      <button type="button" class="member-card" :class="{chosen:selectedKey===q.key}" :aria-pressed="selectedKey===q.key" @click="selectItem(q.key)" @dblclick.stop="startEditing(q.key)">
        <span class="member-rank">#{{position(q.key)}}</span>
        <span class="member-info"><strong>{{q.username}}</strong><span>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'暂无备注'}}</span><small>ID：{{q.user_id||'—'}} · {{timeOf(q.at)}}</small></span>
        <span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span>

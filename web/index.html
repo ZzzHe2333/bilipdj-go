@@ -6,13 +6,13 @@
 <button :class="['nav',{selected:page==='queue'}]" @click="page='queue'"><span>☷</span> 排队管理 <small class="nav-count">{{queue.length}}</small></button>
 <button :class="['nav',{selected:page==='performance'}]" @click="page='performance'"><span>◫</span> 性能监测</button>
 <div class="side-label side-section">系统设置</div>
-<button :class="['nav',{selected:page==='settings'}]" @click="page='settings'"><span>⚙</span> 平台与规则</button>
+<button :class="['nav',{selected:page==='settings'}]" @click="page='settings'"><span>⚙</span> 直播平台与规则</button><button :class="['nav',{selected:page==='system'}]" @click="page='system'"><span>◈</span> 系统配置</button>
 <button :class="['nav',{selected:page==='permissions'}]" @click="page='permissions'"><span>♙</span> 权限管理</button>
 <button :class="['nav',{selected:page==='overlay'}]" @click="page='overlay'"><span>▣</span> OBS 展示设置</button>
 <button :class="['nav',{selected:page==='storage'}]" @click="page='storage';loadStorage()"><span>▥</span> 数据与存档</button>
 <button :class="['nav',{selected:page==='update'}]" @click="page='update'"><span>↻</span> 软件更新</button>
 <div class="sidebar-bottom"><button type="button" class="wizard-reopen" @click="openWizard">新手配置引导 ↗</button><span class="dot" :class="streamReady?'online':'offline'"></span> {{streamReady?'实时事件流已连接':'事件流连接中'}}<p>v{{status.version || '0.1.0'}} · Go + Vue 3</p></div></aside>
-<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',performance:'性能监测',settings:'平台与规则',permissions:'权限管理',overlay:'OBS 展示设置',storage:'数据与存档',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/index" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
+<div class="content"><header class="topbar"><div class="crumb">BiliPDJ <b>/</b> {{({logs:'运行日志',queue:'排队管理',performance:'性能监测',settings:'直播平台与规则',system:'系统配置',permissions:'权限管理',overlay:'OBS 展示设置',storage:'数据与存档',update:'软件更新'})[page]||'运行日志'}}</div><div class="topright"><span class="time">{{now}}</span><button type="button" class="btn small" @click="openWizard">配置引导</button><a href="/index" target="_blank" rel="noopener" class="btn small">打开 OBS 展示 ↗</a></div></header>
 <main>
 <div v-if="notice" class="notice" :class="noticeLevel">{{notice}} <button @click="notice=''">×</button></div>
 <template v-if="page==='logs'">
@@ -67,35 +67,41 @@
  </section>
 </template>
 <template v-else-if="page==='queue'">
-  <div class="page-title"><div><p class="eyebrow">QUEUE MANAGEMENT</p><h1>当前排队管理</h1><p class="muted">参照 Python Windows 版队列表格，支持选中操作和 10 个存档槽位。</p></div><div class="title-actions"><a class="btn small" href="/queue.html" target="_blank" rel="noopener noreferrer" title="在新窗口打开适配手机的独立排队管理页">独立管理页 ↗</a><button class="btn" @click="refresh">刷新队列</button></div></div>
+  <div class="page-title"><div><p class="eyebrow">QUEUE MANAGEMENT</p><h1>当前排队管理</h1><p class="muted">参照 Python Windows 版队列表格，支持选中操作和 10 个存档槽位。</p></div><div class="title-actions"><a class="btn small" href="/queue.html" target="_blank" rel="noopener noreferrer" title="在新窗口打开适配手机的独立排队管理页">独立管理页 ↗</a><button class="btn" @click="refresh">刷新队列</button><button class="btn primary" :disabled="busy" @click="sorting?saveSorting():beginSorting()">{{sorting?'保存排序':'排序'}}</button><button v-if="sorting" class="btn small" @click="cancelSorting">取消排序</button></div></div>
   <div class="queue-summary"><span class="summary-metric"><b>{{queue.length}}</b> 当前排队</span><span class="summary-metric"><b>{{selectedSlot}}</b> 当前槽位</span><span class="summary-metric"><b>{{connectedCount}} / {{enabledMonitorCount}}</b> 在线平台</span></div>
-  <section class="panel queue-manager"><div class="queue-manager-bar"><label>排队存档 <select v-model.number="selectedSlot" @change="changeSlot"><option v-for="n in 10" :key="n" :value="n">存档 {{n}}（{{slotInfo.slots[n]||0}} 人）</option></select></label><label class="search-label">筛选用户 <input v-model.trim="queueSearch" placeholder="用户名、备注或平台"></label><span class="tip">所有平台共享所选槽位，切换前将自动保存当前队列。</span></div>
+  <section class="panel queue-manager"><div class="queue-manager-bar"><label>排队存档 <select v-model.number="selectedSlot" @change="changeSlot"><option v-for="n in 10" :key="n" :value="n">存档 {{n}}（{{slotInfo.slots[n]||0}} 人）</option></select></label><label class="search-label">筛选用户 <input v-model.trim="queueSearch" :disabled="sorting" placeholder="用户名、备注或平台"></label><span class="tip">所有平台共享所选槽位，切换前将自动保存当前队列。</span></div>
    <div class="queue-table-wrap"><table class="queue-table"><thead><tr><th>序号</th><th>用户名</th><th>排队内容 / 类别</th><th>来源平台</th><th>用户 ID</th><th>入队时间</th></tr></thead>
-   <tbody><tr v-for="(q,i) in visibleQueue" :key="q.key" @click="selectedKey=q.key" :class="{chosen:selectedKey===q.key}" tabindex="0" @keydown.enter="selectedKey=q.key" :aria-selected="selectedKey===q.key"><td><b class="rank">{{queue.findIndex(item=>item.key===q.key)+1}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{dateTime(q.at)}}</td></tr><tr v-if="visibleQueue.length===0"><td colspan="6" class="empty">当前槽位没有符合筛选条件的队列条目</td></tr></tbody></table></div>
+   <tbody><tr v-for="(q,i) in visibleQueue" :key="q.key" @click="selectedKey=q.key" @dblclick.stop="openQueueEditor(q)" :draggable="sorting" @dragstart="sortStart($event,q.key)" @dragover="sortOver($event)" @drop="sortDrop($event,q.key)" @dragend="draggingKey=''" :class="{chosen:selectedKey===q.key,'sort-grab':sorting,'sort-dragging':draggingKey===q.key}" tabindex="0" @keydown.enter="selectedKey=q.key" :aria-selected="selectedKey===q.key"><td><b class="rank">{{sorting?i+1:queue.findIndex(item=>item.key===q.key)+1}}</b></td><td><strong>{{q.username}}</strong></td><td>{{q.mode?'['+q.mode+'] ':''}}{{q.note||'—'}}</td><td class="platform-cell"><span class="source" :class="q.platform==='manual'&&q.source_platform?q.source_platform:q.platform">{{queueSourceLabel(q)}}</span></td><td class="mono">{{q.user_id||'—'}}</td><td class="mono">{{dateTime(q.at)}}</td></tr><tr v-if="visibleQueue.length===0"><td colspan="6" class="empty">当前槽位没有符合筛选条件的队列条目</td></tr></tbody></table></div>
    <div class="queue-controls"><div class="queue-editor"><input v-model.trim="newName" placeholder="输入新成员的用户名" maxlength="60" @keyup.enter="addQueue"><button class="btn primary" @click="addQueue" :disabled="!newName">追加到队尾</button><button class="btn" @click="insertQueue" :disabled="!newName">在选中项下方新增</button></div>
     <div class="queue-actions"><button class="btn small" @click="moveSelected(-1)" :disabled="selectedIndex<=0">上移</button><button class="btn small" @click="moveSelected(1)" :disabled="selectedIndex<0||selectedIndex>=queue.length-1">下移</button><button class="btn small" @click="editSelected" :disabled="selectedIndex<0">修改内容</button><button class="btn small" @click="removeSelected" :disabled="selectedIndex<0">删除选中</button><button class="btn small" @click="completeFirst" :disabled="!queue.length">完成首位</button><button class="btn danger-btn small" @click="clearQueue" :disabled="!queue.length">清空当前槽位</button></div>
    </div></section>
-   <section class="panel log-footer-panel"><strong>管理提示</strong><p class="tip">可在「数据与存档」页导出当前槽位为兼容 Python 的 CSV。点击表格行选中成员，可上移、下移、修改备注或删除。使用「在选中项下方新增」保留原版 Windows 的插入位置操作；未选中时默认在队首插入。排队变更会同步到 OBS 展示和实时事件流。</p></section>
+   <div v-if="queueEditing" class="queue-dialog-backdrop" @click.self="queueEditing=false" role="presentation">
+    <section class="queue-edit-dialog" role="dialog" aria-modal="true" aria-label="修改排队信息" @keydown.esc.stop.prevent="queueEditing=false">
+     <header class="queue-edit-header"><h2>修改排队成员</h2><button class="dialog-close" @click="queueEditing=false" aria-label="关闭">×</button></header>
+     <form class="queue-edit-form" @submit.prevent="saveQueueEditor">
+      <label>昵称<input v-model="queueEditName" maxlength="60" :readonly="!queueEditManual"></label>
+      <p v-if="!queueEditManual" class="tip">直播平台身份不可伪造，真实用户只能修改排队备注。</p>
+      <label>备注<textarea v-model="queueEditNote" rows="3" maxlength="1000"></textarea></label>
+      <label>来源平台<select v-model="queueEditSource" :disabled="!queueEditManual"><option value="">无来源</option><option value="bilibili">B站</option><option value="douyin">抖音</option><option value="huya">虎牙</option><option value="wechat_mp">微信公众号</option><option value="kuaishou">快手</option><option value="douyu">斗鱼</option></select></label>
+      <div class="queue-dialog-actions"><button type="button" class="btn" @click="queueEditing=false">取消</button><button class="btn primary" :disabled="busy||!queueEditName.trim()">保存修改</button></div>
+     </form>
+    </section>
+   </div>
+   <section class="panel log-footer-panel"><strong>管理提示</strong><p class="tip">可在「数据与存档」页导出当前槽位为兼容 Python 的 CSV。双击队列条目可弹窗修改；点击“排序”后拖动行，必须点击“保存排序”才应用。使用「在选中项下方新增」保留原版 Windows 的插入位置操作；未选中时默认在队首插入。排队变更会同步到 OBS 展示和实时事件流。</p></section>
 </template>
 
 <template v-else-if="page==='settings'">
  <div class="page-title"><div><p class="eyebrow">PLATFORM CONFIGURATION</p><h1>平台与弹幕规则</h1><p class="muted">按需添加多个平台，监听共享当前存档队列。</p></div></div>
- <section class="panel rules autostart-panel" aria-label="开机自启设置">
-  <div><h2>开机自启</h2><p class="tip">默认关闭。开启后，当前用户登录 Windows / Linux 桌面 / macOS 时自动运行 BiliPDJ-Go；Windows 也可通过右下角托盘图标右键切换。</p></div>
-  <div class="autostart-actions">
-   <label class="check"><input type="checkbox" :checked="!!autostart.enabled" :disabled="autostartLoading||autostartBusy||!autostart.supported" @change="setAutostart($event.target.checked)" aria-label="开机自启"> 登录系统后自动启动</label>
-   <button type="button" class="btn small" :disabled="autostartBusy||autostartLoading" @click="loadAutostart">刷新状态</button>
-   <span class="tip" role="status">{{autostartLoading?'读取中…':autostartBusy?'正在更新…':!autostart.supported?'当前运行环境不支持':autostart.enabled?'已开启':'已关闭'}}</span>
-  </div>
-  <p v-if="autostartError" class="tip autostart-error" role="alert">{{autostartError}}</p>
-  <p class="tip">{{autostart.note||'仅当前用户生效；Docker 请使用容器重启策略。'}}</p>
- </section>
  <section class="panel channel-toolbar"><div><h2>直播平台</h2><p class="tip">默认隐藏未添加的平台。点击「＋ 添加平台」增加配置；保存后才会连接或停止监听。</p></div>
   <div class="channel-add"><button class="btn primary" type="button" @click="showPlatformPicker=!showPlatformPicker" :aria-expanded="showPlatformPicker">＋ 添加平台</button>
    <div v-if="showPlatformPicker" class="channel-picker"><button v-for="p in addablePlatforms" :key="p.id" @click="addPlatform(p.id)" type="button">{{p.name}} <small>{{p.supported?'弹幕监听可用':'占位预留'}}</small></button><p v-if="!addablePlatforms.length" class="tip">所有平台已添加</p></div>
   </div></section>
- <div v-if="!configuredPlatforms.length" class="panel channel-empty">暂无平台配置，点击上方「＋ 添加平台」选择。</div>
- <div class="settings-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id">
+ <nav class="channel-tabs" aria-label="切换直播间配置" role="tablist">
+ <button v-for="p in configuredPlatforms" :key="p.id" type="button" class="channel-tab" role="tab" :aria-selected="activeChannelTab===p.id" :class="{selected:activeChannelTab===p.id}" @click="activeChannelTab=p.id">{{p.name}}</button>
+ <button v-for="room in (config.listeners||[])" :key="room.id" type="button" class="channel-tab" role="tab" :aria-selected="activeChannelTab===room.id" :class="{selected:activeChannelTab===room.id}" @click="activeChannelTab=room.id">{{room.platform==='bilibili'?'B站':'抖音'}} · {{room.room||'新直播间'}}</button>
+</nav>
+<div v-if="!configuredPlatforms.length" class="panel channel-empty">暂无平台配置，点击上方「＋ 添加平台」选择。</div>
+ <div class="settings-grid channel-tabs-grid"><article class="panel settings-card" v-for="p in configuredPlatforms" :key="p.id" v-show="activeChannelTab===p.id">
   <div class="setting-head"><div><h2>{{p.name}}</h2><small :class="p.supported?'support-ok':'support-pending'">{{p.supported?'可用 · 独立监听、统一排队':'占位 · 暂未支持监听'}}</small></div>
     <div class="channel-head-actions"><label v-if="p.supported" class="switch"><input type="checkbox" v-model="config[p.id].enabled" :aria-label="'启用'+p.name"><span class="switch-bg"></span></label><button type="button" class="btn small" @click="removePlatform(p.id)">移除</button></div></div>
   <label>直播间号或直播链接<input v-model.trim="config[p.id].room" :placeholder="p.placeholder" autocomplete="off" @blur="p.id==='douyin'&&normalizeDouyinField()"></label>
@@ -121,7 +127,7 @@
  <p class="tip">新增实例先填写直播间并保持关闭，点击保存，然后逐个扫码绑定对应 B站账号；登录成功后开启监听并保存。每个房间都有自己的连接状态。</p>
 </div>
 <div v-if="(config.listeners||[]).length" class="settings-grid multi-room-grid">
- <article v-for="listener in config.listeners" :key="listener.id" class="panel settings-card">
+ <article v-for="listener in config.listeners" :key="listener.id" v-show="activeChannelTab===listener.id" class="panel settings-card">
   <div class="setting-head">
    <div><h2>{{listener.platform==='bilibili'?'Bilibili 直播间':'抖音直播间'}}</h2>
     <small class="support-ok">独立监听 · 共用队列 · {{listener.id}}</small>
@@ -181,16 +187,51 @@
  <section class="panel rules storage-panel"><h2>当前数据目录</h2><p class="tip">模式：{{storageInfo.mode==='explicit'?'显式指定（Docker / -data）':'系统用户目录管理'}} · {{storageInfo.conflict?'检测到两份数据':'无待处理冲突'}}</p><div class="storage-paths"><div><strong>当前正在读取</strong><code>{{storageInfo.active||'读取中…'}}</code></div><div><strong>旧 Go 目录</strong><code>{{storageInfo.previous_go_root||storageInfo.legacy||'—'}}</code></div><div><strong>系统用户目录</strong><code>{{storageInfo.user||'—'}}</code></div><div><strong>队列存档目录</strong><code>{{storageInfo.archive_dir||'—'}}</code></div><div><strong>备份目录</strong><code>{{storageInfo.backup_dir||'—'}}</code></div><div><strong>日志目录</strong><code>{{storageInfo.log_dir||'—'}}</code></div></div><p v-if="storageInfo.local_conflicts?.length" class="tip">发现 {{storageInfo.local_conflicts.length}} 个新旧存档内容冲突：没有覆盖新目录中已存在的文件，请在人工备份和对比后处理。</p><div class="manual" v-if="storageInfo.mode==='managed'"><button class="btn" :disabled="storageBusy" @click="chooseStorage('user')">确认使用 Go 独立目录</button></div><p class="tip">Go 所有用户数据默认位于 bilipdj-go；Python 继续使用 bilipdj。Go 不会写入 Python 配置、队列、备份或主题；仅在你主动点击导入时，以只读方式读取 Python CSV。</p></section>
  <section class="panel rules storage-panel"><h2>Python CSV 排队存档</h2><p class="tip">手动读取独立 Python bilipdj/archives/queue_archive_slot_1.csv 至 10.csv（便携模式仍支持 core/cd）。兼容五列格式的来源平台和时间；不会自动覆盖 Go 队列。</p><p>已发现：<strong>{{Object.keys(pythonSlots.counts||{}).length}} 个槽位</strong></p><p class="tip">{{JSON.stringify(pythonSlots.counts||{})}}</p><div class="manual"><button class="btn" @click="loadPythonSlots">重新扫描</button><button class="btn primary" @click="importPythonQueues" :disabled="storageBusy||!pythonSlots.available">备份 Go 状态并导入 Python 槽位</button><button class="btn" @click="exportPythonQueue">导出 Go 当前槽位为 Python CSV</button></div><p class="tip">导入更新 Go 队列存档；导出仅下载 CSV，由用户自行选择是否导入 Python，不自动覆盖 Python 原始存档。</p></section>
  </template>
+<template v-else-if="page==='system'">
+ <div class="page-title"><div><p class="eyebrow">SYSTEM CONFIGURATION</p><h1>系统配置</h1><p class="muted">Windows、Linux、macOS 的登录启动设置，不影响 Docker 重启策略。</p></div></div>
+ <section class="panel rules autostart-panel" aria-label="开机自启设置">
+  <div><h2>开机自启</h2><p class="tip">默认关闭。开启后，当前用户登录 Windows / Linux 桌面 / macOS 时自动运行 BiliPDJ-Go；Windows 也可通过右下角托盘图标右键切换。</p></div>
+  <div class="autostart-actions">
+   <label class="check"><input type="checkbox" :checked="!!autostart.enabled" :disabled="autostartLoading||autostartBusy||!autostart.supported" @change="setAutostart($event.target.checked)" aria-label="开机自启"> 登录系统后自动启动</label>
+   <button type="button" class="btn small" :disabled="autostartBusy||autostartLoading" @click="loadAutostart">刷新状态</button>
+   <span class="tip" role="status">{{autostartLoading?'读取中…':autostartBusy?'正在更新…':!autostart.supported?'当前运行环境不支持':autostart.enabled?'已开启':'已关闭'}}</span>
+  </div>
+  <p v-if="autostartError" class="tip autostart-error" role="alert">{{autostartError}}</p>
+  <p class="tip">{{autostart.note||'仅当前用户生效；Docker 请使用容器重启策略。'}}</p>
+ </section>
+
+</template>
+
 <template v-else-if="page==='permissions'">
-<div class="page-title"><div><p class="eyebrow">DESKTOP PERMISSIONS</p><h1>权限管理</h1><p class="muted">对应 Python Windows 版「权限」页；保存后自动同步后端身份名单。</p></div></div>
-<section class="panel rules permission-panel"><h2>弹幕与队列权限</h2>
-<label class="check"><input type="checkbox" v-model="config.switches.fangguan_op"> 允许 B站房管执行管理指令</label>
-<div class="permission-grid"><label>管理员名单（每行一个昵称）<textarea rows="7" v-model="adminsText" placeholder="管理员昵称"></textarea></label>
-<label>最高管理员（仅最高管理员可以增删管理员）<textarea rows="7" v-model="superAdminsText" placeholder="最高管理员昵称"></textarea></label>
-<label>舰长白名单（真实舰长等级同时生效）<textarea rows="7" v-model="guardsText" placeholder="舰长昵称"></textarea></label>
-<label>黑名单（昵称或用户 ID，每行一个）<textarea rows="7" v-model="blacklistText" placeholder="拒绝其排队或管理命令"></textarea></label></div>
-<p class="tip">警告：历史兼容的昵称授权仍有同名冒用风险；对高权限用户建议核实平台身份。黑名单优先于管理员身份。</p>
-<button class="btn primary" :disabled="busy" @click="saveConfig">{{busy?'正在保存…':'保存权限配置'}}</button></section>
+ <div class="page-title"><div><p class="eyebrow">IDENTITY & ACCESS</p><h1>权限管理</h1><p class="muted">只显示明确配置过的昵称。不在名单里的用户依然是普通用户，不会自动添加到表格。</p></div>
+ <div class="title-actions"><button class="btn" @click="editPermission()">＋ 新增用户</button><button class="btn primary" :disabled="busy" @click="savePermissions">{{busy?'正在保存…':'保存权限列表'}}</button></div></div>
+ <div class="panel rules">
+  <div class="permission-actions"><label class="check"><input type="checkbox" v-model="config.switches.fangguan_op"> 允许 B站房管使用管理命令（单独开关）</label><button class="btn small" @click="saveConfig">保存房管开关</button><span class="tip" v-if="permissionDirty">权限存在未保存修改</span></div>
+  <div class="queue-table-wrap"><table class="permission-table"><thead><tr><th>ID（昵称）</th><th>平台</th><th>身份</th><th>权限内容</th><th>操作</th></tr></thead>
+   <tbody><tr v-for="(person,i) in permissionRows" :key="person.platform+':'+person.id" @dblclick="editPermission(i)">
+    <td><strong>{{person.id}}</strong></td>
+    <td>{{scopeLabel(person.platform)}}</td><td>{{roleLabel(person.role)}}</td>
+    <td>{{person.role==='super_admin'?'全部权限':person.role==='admin'||person.role==='part_time'?(person.capabilities||[]).map(capLabel).join('、')||'未授权管理指令':'无管理权限'}}</td>
+    <td class="permission-actions"><button type="button" class="btn small" @click.stop="editPermission(i)">编辑</button><button type="button" class="btn small" @click.stop="removePermission(i)">移除</button></td>
+   </tr><tr v-if="!permissionRows.length"><td colspan="5" class="empty">尚无手动配置的权限；点击「新增用户」添加。</td></tr></tbody></table></div>
+  <p class="tip">同一昵称可分别配置 B站、抖音或两平台。超级管理员拥有所有权限；管理员默认不允许任命管理员，且其管理命令可以逐项关闭；兼职仅获得被勾选的权限。黑名单可由管理员通过弹幕「拉黑 昵称」添加。</p>
+  <p class="tip">权限按平台和显示昵称匹配；无法证明昵称唯一身份。敏感权限建议另行核实平台真实用户 ID，避免同名冒用。</p>
+ </div>
+ <div v-if="permissionEditing" class="queue-dialog-backdrop" @click.self="permissionEditing=false">
+  <section class="queue-edit-dialog" role="dialog" aria-modal="true" aria-label="编辑权限" @keydown.esc.stop.prevent="permissionEditing=false">
+   <header class="queue-edit-header"><h2>{{permissionEditIndex<0?'新增权限':'编辑权限'}}</h2><button type="button" class="dialog-close" @click="permissionEditing=false">×</button></header>
+   <form class="queue-edit-form" @submit.prevent="confirmPermission">
+    <label>ID（昵称）<input v-model.trim="permissionDraft.id" maxlength="60" required></label>
+    <label>认可平台<select v-model="permissionDraft.platform"><option value="bilibili">B站</option><option value="douyin">抖音</option><option value="all">B站和抖音</option></select></label>
+    <label>身份<select v-model="permissionDraft.role" @change="permissionRoleChanged"><option value="super_admin">超级管理员</option><option value="admin">管理员</option><option value="part_time">兼职</option><option value="user">用户</option><option value="blacklist">黑名单</option></select></label>
+    <fieldset v-if="permissionDraft.role==='admin'||permissionDraft.role==='part_time'"><legend>权限内容（取消勾选即禁止该管理指令）</legend>
+     <div class="permission-capabilities"><label v-for="cap in permissionCaps" :key="cap.id"><input type="checkbox" :checked="permissionDraft.capabilities.includes(cap.id)" @change="permissionCapToggle(cap.id,$event.target.checked)"> {{cap.label}}</label></div>
+    </fieldset>
+    <p class="tip" v-else>{{permissionDraft.role==='super_admin'?'超级管理员自动拥有全部权限，无需逐项勾选。':'此身份没有管理员指令权限。'}}</p>
+    <div class="queue-dialog-actions"><button type="button" class="btn" @click="permissionEditing=false">取消</button><button type="submit" class="btn primary">确认修改</button></div>
+   </form>
+  </section>
+ </div>
 </template>
 <template v-else-if="page==='overlay'">
 <div class="page-title"><div><p class="eyebrow">OBS OVERLAY</p><h1>OBS 浏览器源样式</h1><p class="muted">旧版透明排队浏览器源 /index 已兼容；以下改动无需保存就会实时显示在预览框中。</p></div><a class="btn" href="/index" target="_blank" rel="noopener">单独打开 OBS 展示 ↗</a></div>
@@ -232,8 +273,22 @@
  <label>文字渐变结束色<input v-model.trim="obsStyle.text_grad_end" placeholder="#aaccff"></label>
 </fieldset></div>
 <div class="manual obs-editor-actions"><button class="btn primary" :disabled="busy" @click="saveObsStyle">保存并应用到 OBS</button><button class="btn" @click="loadObsStyle">恢复已保存样式</button></div>
-<div class="obs-preview-toolbar"><div><strong>实时效果预览</strong><p class="tip">调整上方字号或颜色即刻变化；仅在设置页显示棋盘格，实际 OBS 不包含棋盘格背景。如果队列为空，将显示十二名演示成员，用于预览显示人数和滚动速度。</p></div><label>预览底色<select v-model="obsPreviewBackdrop"><option value="checker">透明棋盘格</option><option value="dark">暗色背景</option><option value="light">亮色背景</option><option value="green">绿色背景</option></select></label></div>
+<div class="obs-preview-open"><button v-if="!previewOpen" class="btn primary" @click="previewOpen=true">打开实时悬浮预览</button><p class="tip">预览窗口支持拖动，浮窗内可以保存样式槽位，或将已有样式槽位应用到 OBS。</p></div>
+<div v-if="previewOpen" class="obs-floating-preview" :style="previewPositionStyle" role="region" aria-label="可移动实时效果预览浮窗">
+ <header class="obs-floating-head" @pointerdown="previewDragStart" @pointermove="previewDragMove" @pointerup="previewDragEnd" @pointercancel="previewDragEnd">
+  <span>⠿ 实时效果预览 · 拖动标题栏移动</span>
+  <button type="button" class="btn small" @pointerdown.stop @click="previewOpen=false" aria-label="关闭预览窗口">×</button>
+ </header>
+ <div class="obs-preview-toolbar"><div><strong>实时效果预览</strong><p class="tip">修改字号或颜色立即刷新悬浮预览；棋盘格不属于 OBS 输出，实际 OBS 不包含棋盘格背景。如果队列为空，将显示十二名演示成员，用于预览显示人数和滚动速度。</p></div><label>预览底色<select v-model="obsPreviewBackdrop"><option value="checker">透明棋盘格</option><option value="dark">暗色背景</option><option value="light">亮色背景</option><option value="green">绿色背景</option></select></label></div>
 <div class="obs-preview-stage" :class="'obs-backdrop-'+obsPreviewBackdrop"><iframe class="obs-preview" ref="obsPreviewFrame" title="OBS 透明实时预览" src="/index" @load="sendObsPreview"></iframe></div>
+
+ <div class="obs-float-actions">
+  <label>样式存档<select v-model.number="styleSlot"><option v-for="n in 10" :value="n" :key="n">样式 {{n}} {{styleSlots.find(v=>v.slot===n)?.saved?'· 已保存':'· 空'}}</option></select></label>
+  <button type="button" class="btn small" :disabled="busy" @click="saveStyleSlot">保存至样式 {{styleSlot}}</button>
+  <button type="button" class="btn small" :disabled="busy" @click="previewStyleSlot">读取预览</button>
+  <button type="button" class="btn primary small" :disabled="busy" @click="applyStyleSlot">使用样式 {{styleSlot}}</button>
+ </div>
+</div>
 <div class="obs-url-box"><label for="obs-url-field">OBS 浏览器源 URL<input id="obs-url-field" type="text" readonly :value="obsURL" @focus="$event.target.select()"></label><div class="quick-actions"><button class="btn primary small" @click="copyObsURL">复制浏览器源地址</button><a class="btn small" href="/index" target="_blank" rel="noopener">打开透明源 ↗</a></div></div></article>
 <section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">OBS → 添加「浏览器源」→ 把上方地址复制到 URL。以前 Python Web 版的 <code>/index</code> 地址已经兼容，之前 Go 的 <code>/overlay.html</code> 也继续有效。不同端口或远程访问请使用实际访问本程序的主机和端口；直接在系统浏览器中查看透明页面时，浏览器自身背景可能显示白色或黑色，透明度应在 OBS 中或上面的棋盘格预览确认。</p></section>
 </template>

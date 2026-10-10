@@ -42,6 +42,7 @@ type Config struct {
 	Admins              []string       `json:"admins"`
 	SuperAdmins         []string       `json:"super_admins"`
 	Guards              []string       `json:"guards"`
+	Permissions         []PermissionEntry `json:"permissions"`
 	DailyQueueLimit     int            `json:"daily_queue_limit"`
 	DailyQueueResetTime string         `json:"daily_queue_reset_time"`
 	Blacklist           []string       `json:"blacklist"`
@@ -109,6 +110,7 @@ type persisted struct {
 	GiftCredits         map[string]int         `json:"gift_credits,omitempty"`
 	GiftUsed            map[string]bool        `json:"gift_used,omitempty"`
 	GiftSeen            []string               `json:"gift_seen,omitempty"`
+	StyleSlots          map[string]map[string]any `json:"style_slots,omitempty"`
 	Style               map[string]any         `json:"style,omitempty"`
 	Appearance          map[string]any         `json:"appearance,omitempty"`
 }
@@ -127,6 +129,7 @@ type App struct {
 	giftUsed            map[string]bool
 	giftSeen            []string
 	giftLast            *live.Event
+	styleSlots          map[string]map[string]any
 	style               map[string]any
 	appearance          map[string]any
 	messages            []live.Event
@@ -166,7 +169,7 @@ func (a *App) SetInstallAction(f func(update.Downloaded) error) { a.installActio
 func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
 
 func New(dataDir, version, repo string) *App {
-	a := &App{config: defaultConfig(), style: defaultStyle(), appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a := &App{config: defaultConfig(), style: defaultStyle(), styleSlots: map[string]map[string]any{}, appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.updater = update.New(repo, version, dataDir)
 	a.performance = perf.New(dataDir)
 	a.autostart = autostart.New()
@@ -198,6 +201,7 @@ func New(dataDir, version, repo string) *App {
 				a.giftUsed = p.GiftUsed
 			}
 			a.giftSeen = p.GiftSeen
+			if p.StyleSlots!=nil {a.styleSlots=p.StyleSlots}
 			if a.config.GiftQueue == nil {
 				a.config.GiftQueue = defaultGiftSettings()
 			}
@@ -265,7 +269,7 @@ func (a *App) saveLocked() error {
 		savedQueue = nil
 		savedSlots = nil
 	}
-	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: savedQueue, QueueExternal: a.queuePath != "", Slots: savedSlots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}, "", "  ")
+	raw, e := json.MarshalIndent(persisted{OnboardingCompleted: a.onboardingCompleted, Config: a.config, Queue: savedQueue, QueueExternal: a.queuePath != "", Slots: savedSlots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, StyleSlots: a.styleSlots, Style: a.style, Appearance: a.appearance}, "", "  ")
 	if e != nil {
 		return e
 	}
@@ -369,11 +373,7 @@ func (a *App) OnDanmu(e live.Event) {
 	}
 	a.publishLocked(Event{Type: "danmu", Data: e})
 	a.appendLogLocked("INFO", e.Platform, e.Username+"："+e.Content)
-	for _, s := range a.config.Blacklist {
-		if strings.EqualFold(strings.TrimSpace(s), e.Username) || s == e.UserID {
-			return
-		}
-	}
+	if a.isBlacklisted(e){return}
 	if a.processDanmuCommandLocked(e) {
 		if err := a.saveLocked(); err != nil {
 			log.Printf("queue persist: %v", err)
@@ -511,6 +511,11 @@ func cleanConfig(c Config) (Config, error) {
 	if len([]rune(c.Command)) > 16 {
 		return c, errors.New("口令最多 16 个字符")
 	}
+	if c.Permissions!=nil {
+        var err error
+        c.Permissions,err=cleanPermissions(c.Permissions)
+        if err!=nil{return c,err}
+    }
 	if len(c.Bilibili.Cookie) > 8192 || len(c.Douyin.Cookie) > 8192 {
 		return c, errors.New("Cookie 超过长度限制")
 	}
@@ -794,6 +799,9 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         if cfg.Listeners==nil&&len(a.config.Listeners)>0 {
           cfg.Listeners=append([]ListenerConfig{},a.config.Listeners...)
         }
+        if cfg.Permissions==nil&&a.config.Permissions!=nil{
+           cfg.Permissions=append([]PermissionEntry{},a.config.Permissions...)
+        }
         // Credential preservation uses immutable instance IDs, not array indices.
         // Removed IDs do not inherit or leak any old Cookie.
         byID:=make(map[string]string,len(a.config.Listeners))
@@ -846,6 +854,9 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			NameEdit *string `json:"new_name,omitempty"`
 			SourcePlatform *string `json:"source_platform,omitempty"`
 			Index  int    `json:"index"`
+			Keys []string `json:"keys,omitempty"`
+            Slot int `json:"slot,omitempty"`
+			Before []string `json:"before,omitempty"`
 		}
 		if e := decode(r, &req); e != nil {
 			send(w, 400, map[string]string{"error": e.Error()})
@@ -854,6 +865,28 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		switch req.Action {
+        case "reorder":
+            if req.Slot!=a.config.ArchiveSlot{send(w,409,map[string]string{"error":"当前存档已被切换，取消排序并刷新"});return}
+            if len(req.Keys)!=len(a.queue)||len(req.Before)!=len(a.queue){
+                send(w,409,map[string]string{"error":"队列人数已改变，请刷新后重新排序"});return
+            }
+            existing:=make(map[string]QueueItem,len(a.queue))
+            for i,item:=range a.queue {
+                if item.Key==""||req.Before[i]!=item.Key {
+                    send(w,409,map[string]string{"error":"排序期间队列已被修改，请重新排序"});return
+                }
+                existing[item.Key]=item
+            }
+            sorted:=make([]QueueItem,0,len(a.queue))
+            seen:=make(map[string]bool,len(a.queue))
+            for _,key:=range req.Keys {
+                item,found:=existing[key]
+                if !found||seen[key]{
+                    send(w,400,map[string]string{"error":"排序包含无效或重复的成员"});return
+                }
+                seen[key]=true;sorted=append(sorted,item)
+            }
+            a.queue=sorted
 		case "clear":
 			a.queue = []QueueItem{}
 		case "remove":
@@ -1055,6 +1088,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	a.qrRoutes(mux)
 	a.wsRoutes(mux)
 	a.legacyRoutes(mux)
+	a.permissionRoutes(mux)
 	a.storageRoutes(mux)
 	mux.HandleFunc("GET /control", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusTemporaryRedirect) })
 	mux.HandleFunc("GET /index", func(w http.ResponseWriter, r *http.Request) {

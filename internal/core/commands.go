@@ -53,15 +53,29 @@ func (a *App) stripBlacklistedRolesLocked() {
 	}
 }
 func (a *App) isSuperOperator(e live.Event) bool {
-	// IsAnchor is verified against room_init's UID, never guessed from nickname.
-	return (e.Platform == "bilibili" && e.IsAnchor) || named(a.config.SuperAdmins, e.Username)
+ if a.isBlacklisted(e){return false}
+ if e.Platform=="bilibili"&&e.IsAnchor{return true}
+ p,ok:=a.config.effectiveEntry(e)
+ if ok{return p.Role=="super_admin"}
+ if a.config.Permissions!=nil{return false}
+ return named(a.config.SuperAdmins,e.Username)
 }
 func (a *App) isOperator(e live.Event) bool {
-	return a.isSuperOperator(e) || named(a.config.Admins, e.Username) ||
-		(e.Platform == "bilibili" && e.IsRoomAdmin && a.config.Switches != nil && a.config.Switches.RoomAdminOperator)
+ if a.isBlacklisted(e){return false}
+ if a.isSuperOperator(e){return true}
+ p,ok:=a.config.effectiveEntry(e)
+ if ok{return (p.Role=="admin"||p.Role=="part_time")&&hasManagementCaps(p.Capabilities)}
+ if a.config.Permissions!=nil{return e.Platform=="bilibili"&&e.IsRoomAdmin&&a.config.Switches!=nil&&a.config.Switches.RoomAdminOperator}
+ return named(a.config.Admins,e.Username)||(e.Platform=="bilibili"&&e.IsRoomAdmin&&a.config.Switches!=nil&&a.config.Switches.RoomAdminOperator)
 }
 func (a *App) isGuard(e live.Event) bool {
-	return (e.Platform == "bilibili" && e.GuardLevel > 0) || named(a.config.Guards, e.Username)
+ if e.Platform!="bilibili" {return false}
+ if e.GuardLevel>0{return true}
+ if a.config.Permissions!=nil{
+  p,ok:=a.config.effectiveEntry(e)
+  return ok&&containsCap(p.Capabilities,"guard_insert")
+ }
+ return named(a.config.Guards,e.Username)
 }
 func (a *App) dailyPeriodAt(now time.Time) string {
 	local := now.In(time.Local)
@@ -126,61 +140,67 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 		}
 	}
 	operator := a.isOperator(e)
+    queuePrivileged:=a.commandAllowed(e,"queue")
 	super := a.isSuperOperator(e)
+ // A super-admin can revoke an administrator's entire insert capability.
+ // Do not re-enable "插队" indirectly via that admin's verified guard/gift
+ // status if this explicit restriction is present.
+ if input=="插队"&&!super {
+  p,ok:=a.config.effectiveEntry(e)
+  if ok&&p.Role=="admin"&&!containsCap(p.Capabilities,"insert"){return false}
+ }
 	if operator {
 		if super {
 			switch {
 			case strings.HasPrefix(input, "添加管理员 "):
 				target := strings.TrimSpace(strings.TrimPrefix(input, "添加管理员 "))
-				if target != "" && len([]rune(target)) <= 60 && !named(a.config.Blacklist, target) && !named(a.config.Admins, target) {
-					a.config.Admins = append(a.config.Admins, target)
-					return true
-				}
+				if target!=""&&len([]rune(target))<=60&&!a.isBlacklisted(live.Event{Platform:e.Platform,Username:target}){return a.upsertRoleLocked(e.Platform,target,"admin")}
 				return false
 			case strings.HasPrefix(input, "取消管理员 "):
 				target := strings.TrimSpace(strings.TrimPrefix(input, "取消管理员 "))
-				if named(a.config.Admins, target) {
-					a.config.Admins = removeName(a.config.Admins, target)
-					return true
-				}
+				if a.removeRoleLocked(e.Platform,target,"admin"){return true}
 				return false
 			}
 		}
 		switch {
 		case strings.HasPrefix(input, "拉黑 "):
 			target := strings.TrimSpace(strings.TrimPrefix(input, "拉黑 "))
-			if target != "" && len([]rune(target)) <= 60 && !named(a.config.Blacklist, target) {
-				a.config.Blacklist = append(a.config.Blacklist, target)
-				a.stripBlacklistedRolesLocked()
-				return true
-			}
+			if a.commandAllowed(e,"moderate"){
+                victim,exists:=a.config.effectiveEntry(live.Event{Platform:e.Platform,Username:target})
+                if exists&&victim.Role=="super_admin"&&!super{return false}
+                if a.upsertRoleLocked(e.Platform,target,"blacklist"){return true}
+            }
 			return false
 		case strings.HasPrefix(input, "取消拉黑 "):
 			target := strings.TrimSpace(strings.TrimPrefix(input, "取消拉黑 "))
-			if named(a.config.Blacklist, target) {
-				a.config.Blacklist = removeName(a.config.Blacklist, target)
-				return true
-			}
+			if a.commandAllowed(e,"moderate")&&a.removeRoleLocked(e.Platform,target,"blacklist"){return true}
 			return false
 		case input == "暂停排队功能" || input == "关闭自助排队":
+            if !a.commandAllowed(e,"switch"){return false}
 			a.config.Switches.Paidui = false
 			return true
 		case input == "恢复排队功能" || input == "恢复自助排队":
+            if !a.commandAllowed(e,"switch"){return false}
 			a.config.Switches.Paidui = true
 			return true
 		case input == "开启舰长插队":
+            if !a.commandAllowed(e,"switch"){return false}
 			a.config.Switches.GuardInsert = true
 			return true
 		case input == "关闭舰长插队":
+            if !a.commandAllowed(e,"switch"){return false}
 			a.config.Switches.GuardInsert = false
 			return true
 		case input == "允许房管成为插件管理员":
+            if !a.commandAllowed(e,"switch"){return false}
 			a.config.Switches.RoomAdminOperator = true
 			return true
 		case input == "停止房管成为插件管理员":
+            if !a.commandAllowed(e,"switch"){return false}
 			a.config.Switches.RoomAdminOperator = false
 			return true
 		case strings.HasPrefix(input, "设置排队人数") || strings.HasPrefix(input, "设置排队上限"):
+            if !a.commandAllowed(e,"limits"){return false}
 			for _, prefix := range []string{"设置排队人数上限", "设置排队人数", "设置排队上限"} {
 				if strings.HasPrefix(input, prefix) {
 					tail := strings.TrimSpace(strings.TrimPrefix(input, prefix))
@@ -192,11 +212,13 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 				}
 			}
 		case input == "完成":
+            if !a.commandAllowed(e,"queue"){return false}
 			if len(a.queue) > 0 {
 				a.queue = a.queue[1:]
 				return true
 			}
 		case strings.HasPrefix(input, "删除 ") || strings.HasPrefix(input, "完成 ") || strings.HasPrefix(input, "del "):
+            if !a.commandAllowed(e,"queue"){return false}
 			words := strings.Fields(input)
 			if len(words) == 2 {
 				if n, err := strconv.Atoi(words[1]); err == nil && n > 0 && n <= len(a.queue) {
@@ -205,24 +227,29 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 				}
 			}
 		case strings.HasPrefix(input, "新增 ") || strings.HasPrefix(input, "添加 ") || strings.HasPrefix(input, "add "):
+            if !a.commandAllowed(e,"queue"){return false}
 			words := strings.SplitN(input, " ", 2)
 			if len(words) == 2 {
 				return a.appendManualLocked(strings.TrimSpace(words[1]), e.Time)
 			}
 		case strings.HasPrefix(input, "无影插 ") || strings.HasPrefix(input, "插队 "):
+            if !a.commandAllowed(e,"insert"){return false}
 			words := strings.SplitN(input, " ", 3)
 			if len(words) == 3 {
 				n, err := strconv.Atoi(words[1])
-				if err == nil && n > 0 && n <= 30 && n <= len(a.queue)+1 {
+				if err == nil && n > 0 && n <= 30 && (words[0] != "无影插" || n <= 20) {
 					name := strings.TrimSpace(words[2])
 					if name != "" && len([]rune(name)) <= 200 && len(a.queue) < 10000 {
 						if words[0] == "插队" {
 							name = "@" + name
 						}
 						item := QueueItem{Key: fmt.Sprintf("admin:%d", time.Now().UnixNano()), Platform: "manual", Username: name, At: e.Time}
+						// Python list.insert clamps positions beyond the current queue end.
+                        at:=n-1
+                        if at>len(a.queue){at=len(a.queue)}
 						a.queue = append(a.queue, QueueItem{})
-						copy(a.queue[n:], a.queue[n-1:len(a.queue)-1])
-						a.queue[n-1] = item
+						copy(a.queue[at+1:], a.queue[at:len(a.queue)-1])
+						a.queue[at] = item
 						return true
 					}
 				}
@@ -232,7 +259,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 	if input == "插队" && a.config.AutoQueue && (a.config.Switches == nil || a.config.Switches.Paidui) && a.useGiftCreditLocked(e, index) {
 		return true
 	}
-	if a.config.GiftQueue != nil && a.config.GiftQueue.GiftOnly && !operator && index < 0 {
+	if a.config.GiftQueue != nil && a.config.GiftQueue.GiftOnly && !queuePrivileged && index < 0 {
 		return false
 	}
 	if !a.config.AutoQueue || (a.config.Switches != nil && !a.config.Switches.Paidui) {
@@ -327,7 +354,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 			return false
 		}
 	}
-	if !allowed(mode) || len(a.queue) >= 10000 || (a.config.MaxQueue > 0 && len(a.queue) >= a.config.MaxQueue && !operator) || (!operator && !a.dailyCanJoin(e)) {
+	if !allowed(mode) || len(a.queue) >= 10000 || (a.config.MaxQueue > 0 && len(a.queue) >= a.config.MaxQueue && !queuePrivileged) || (!queuePrivileged && !a.dailyCanJoin(e)) {
 		return false
 	}
 	note := strings.TrimLeft(strings.TrimSpace(strings.TrimPrefix(input, prefix)), " ：:")
@@ -335,7 +362,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 		return false
 	}
 	a.queue = append(a.queue, QueueItem{Key: key, Platform: e.Platform, UserID: e.UserID, Username: e.Username, Mode: mode, Note: note, At: e.Time})
-	if !operator {
+	if !queuePrivileged {
 		a.dailyMarkJoin(e)
 	}
 	return true
