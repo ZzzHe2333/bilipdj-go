@@ -17,12 +17,13 @@ type PermissionEntry struct {
  Role string `json:"role"`
  Capabilities []string `json:"capabilities,omitempty"`
 }
-var permissionCaps=[]string{"moderate","queue","insert","switch","limits"}
+var permissionCaps=[]string{"moderate","queue","insert","switch","limits","guard_insert"}
 var adminDefaults=[]string{"moderate","queue","insert","switch","limits"}
 var parttimeDefaults=[]string{"queue"}
 
 func copyCaps(v []string)[]string{return append([]string(nil),v...)}
 func containsCap(v []string,needle string)bool{for _,c:=range v{if c==needle{return true}};return false}
+func hasManagementCaps(v []string)bool{for _,c:=range adminDefaults{if containsCap(v,c){return true}};return false}
 
 func cleanPermissions(entries []PermissionEntry)([]PermissionEntry,error){
  if len(entries)>1500{return nil,errors.New("身份名单超过 1500 条")}
@@ -62,7 +63,7 @@ func legacyPermissions(c Config)[]PermissionEntry{
    if !found{
     row:=PermissionEntry{Name:name,Platform:"all",Role:role}
     if role=="admin"{row.Capabilities=copyCaps(adminDefaults)}
-    if role=="part_time"{row.Capabilities=copyCaps(parttimeDefaults)}
+    if role=="part_time"{row.Capabilities=[]string{"guard_insert"}}
     out=append(out,row)
    }
   }
