@@ -38,7 +38,7 @@ func (a *App) loadWebAppearanceFiles() {
 			continue
 		}
 		if kind == "style" {
-			a.style = v
+			for key, value := range v { a.style[key] = value }
 		} else {
 			a.appearance = v
 		}
