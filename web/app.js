@@ -4,12 +4,13 @@ createApp({setup(){
  const page=ref('logs'), status=ref({}), statuses=computed(()=>status.value.platforms||{});
  const wizardOpen=ref(false),wizardStep=ref(0),wizardBusy=ref(false),wizardLoaded=ref(false),wizardError=ref('');
  const autostart=ref({supported:false,enabled:false,note:'正在检测系统登录启动项…'}),autostartLoading=ref(false),autostartBusy=ref(false),autostartError=ref('');
- const config=ref({bilibili:{room:'',cookie:'',enabled:false},douyin:{room:'',cookie:'',enabled:false},auto_queue:true,command:'排队',gift_queue:{enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false}});
+ const config=ref({listeners:[],bilibili:{room:'',cookie:'',enabled:false},douyin:{room:'',cookie:'',enabled:false},auto_queue:true,command:'排队',gift_queue:{enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false}});
  const obsStyle=ref({transparent_background:true}),obsPreviewFrame=ref(null),obsPreviewBackdrop=ref('checker');
  const obsURL=computed(()=>window.location.origin+'/index');
  const giftStatus=ref(null), giftNamesText=ref('');
  const qrImage=ref(''), qrState=ref(''), qrLink=ref('');let qrTimer=null, qrPolling=false;
  const legacyFile=ref(null), legacyPreview=ref(null), blacklistText=ref(''), adminsText=ref(''), superAdminsText=ref(''), guardsText=ref('');
+ const listenerCookies=ref({}),qrInstanceId=ref('bilibili');
  const cookieConfigured=ref({bilibili:false,douyin:false}), messages=ref([]),queue=ref([]),filter=ref('all'),slotInfo=ref({active_slot:1,slots:{}}),selectedSlot=ref(1);
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
@@ -113,7 +114,24 @@ createApp({setup(){
  const configuredPlatforms=computed(()=>platformCatalog.filter(p=>(config.value.visible_platforms||[]).includes(p.id)));
  const addablePlatforms=computed(()=>platformCatalog.filter(p=>!(config.value.visible_platforms||[]).includes(p.id)));
  const monitorPlatforms=computed(()=>configuredPlatforms.value.filter(p=>p.supported&&config.value[p.id]?.enabled));
- const enabledMonitorCount=computed(()=>monitorPlatforms.value.length);
+
+ const extraMonitorPlatforms=computed(()=>(config.value.listeners||[]).filter(v=>v.enabled).map(v=>({id:v.platform,instanceId:v.id,name:(v.platform==='bilibili'?'Bilibili':'抖音')+' · '+v.room,room:v.room,supported:true})));
+ const enabledMonitorCount=computed(()=>monitorPlatforms.value.length+extraMonitorPlatforms.value.length);
+ function addExtraListener(platform){
+  const existing=config.value.listeners||[];
+  if(existing.length>=30){message('额外直播间不能超过 30 个','error');return}
+  const id=platform+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+  config.value.listeners=[...existing,{id,platform,enabled:false,room:'',cookie:''}];
+  message('已添加直播间；填写后保存。B站需要分别配置 Cookie。','info');
+ }
+ function removeExtraListener(id){
+  if(!window.confirm('移除此直播间？保存后停止监听并删除其 Cookie。'))return;
+  config.value.listeners=(config.value.listeners||[]).filter(v=>v.id!==id);
+  if(qrInstanceId.value===id){stopQR();qrImage.value='';qrInstanceId.value='bilibili'}
+  message('已标记移除，点击保存后生效','info');
+ }
+ function normalizeExtraDouyin(v){try{if(v.room)v.room=normalizeDouyinRoom(v.room)}catch(e){message(e.message,'error')}}
+
  function addPlatform(id){if(!platformCatalog.some(p=>p.id===id))return;
   if(!config.value[id])config.value[id]={enabled:false,room:'',cookie:''};
   if(!(config.value.visible_platforms||[]).includes(id))config.value.visible_platforms=[...(config.value.visible_platforms||[]),id];
@@ -143,7 +161,7 @@ createApp({setup(){
  const filteredLogs=computed(()=>logs.value.filter(l=>(logLevel.value==='ALL'||logOrder[l.level]>=logOrder[logLevel.value])&&(logCategory.value==='all'||l.category===logCategory.value)&&(!logSearch.value||`${l.level} ${l.category} ${l.message}`.toLowerCase().includes(logSearch.value.toLowerCase()))));
  const visibleQueue=computed(()=>queue.value.filter(q=>!queueSearch.value||`${q.username} ${q.note} ${q.mode} ${q.platform} ${q.source_platform||''} ${q.user_id}`.toLowerCase().includes(queueSearch.value.toLowerCase())));
  const selectedIndex=computed(()=>queue.value.findIndex(q=>q.key===selectedKey.value));
- const connectedCount=computed(()=>monitorPlatforms.value.filter(p=>statuses.value[p.id]?.connected).length);
+ const connectedCount=computed(()=>[...monitorPlatforms.value,...extraMonitorPlatforms.value].filter(p=>statuses.value[p.instanceId||p.id]?.connected).length);
  const filteredMessages=computed(()=>[...messages.value].reverse().filter(m=>filter.value==='all'||filter.value===m.platform));
  const dateTime=t=>{try{return new Date(t).toLocaleTimeString('zh-CN',{hour12:false})}catch{return ''}};
  let eventStream=null, poller=null, clock=null;
@@ -188,8 +206,8 @@ createApp({setup(){
  watch([filteredLogs,autoScroll],()=>{if(autoScroll.value)nextTick(()=>{const el=logListRef.value;if(el)el.scrollTop=el.scrollHeight})},{flush:'post'});
  async function refresh(){try{const [s,q,m,slots]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages'),api('/api/queue/slots')]);status.value=s;queue.value=q;messages.value=m;slotInfo.value=slots;selectedSlot.value=slots.active_slot}catch(e){message(e.message,'error')}}
  async function loadAppearance(){try{const appearance=await api('/api/appearance');const mode=appearance.mode==='light'?'light':'dark';const colors=appearance[mode]||{};const root=document.documentElement;const mapping={'--bg':'background','--panel':'surface','--panel2':'surface_alt','--line':'border','--text':'text','--dim':'muted','--accent':'accent'};for(const [css,k] of Object.entries(mapping)){const value=colors[k];if(typeof value==='string' && /^#[0-9a-fA-F]{3,8}$/.test(value))root.style.setProperty(css,value)}root.style.colorScheme=mode}catch{}}
- async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;previousBiliEnabled.value=!!config.value.bilibili?.enabled;if(!Array.isArray(config.value.visible_platforms))config.value.visible_platforms=platformCatalog.filter(p=>config.value[p.id]?.enabled).map(p=>p.id);if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
- async function saveConfig(){busy.value=true;try{if(config.value.douyin?.room)config.value.douyin.room=normalizeDouyinRoom(config.value.douyin.room);if(config.value.bilibili?.enabled&&!cookieConfigured.value.bilibili&&!String(config.value.bilibili.cookie||'').trim()&&!previousBiliEnabled.value)throw Error('请先扫码登录 B站，再开启弹幕监听');config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
+ async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!Array.isArray(config.value.listeners))config.value.listeners=[];listenerCookies.value=d.listener_cookies||{};previousBiliEnabled.value=!!config.value.bilibili?.enabled;if(!Array.isArray(config.value.visible_platforms))config.value.visible_platforms=platformCatalog.filter(p=>config.value[p.id]?.enabled).map(p=>p.id);if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
+ async function saveConfig(){busy.value=true;try{if(config.value.douyin?.room)config.value.douyin.room=normalizeDouyinRoom(config.value.douyin.room);for(const p of (config.value.listeners||[])){if(p.platform==='douyin'&&p.room)p.room=normalizeDouyinRoom(p.room)}if(config.value.bilibili?.enabled&&!cookieConfigured.value.bilibili&&!String(config.value.bilibili.cookie||'').trim()&&!previousBiliEnabled.value)throw Error('请先扫码登录 B站，再开启弹幕监听');config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
  async function loadGiftStatus(){try{giftStatus.value=await api('/api/gifts/state')}catch(e){message(e.message,'error')}}
  async function loadObsStyle(){
   try{
@@ -284,17 +302,27 @@ createApp({setup(){
  function stopQR(){if(qrTimer!==null){clearInterval(qrTimer);qrTimer=null}}
  async function pollQR(){if(qrPolling || !qrImage.value)return;qrPolling=true;
   try{const result=await api('/api/bili/qr/poll',{method:'POST',body:'{}'});
-   if(result.status==='success'){stopQR();qrImage.value='';qrLink.value='';qrState.value='扫码登录成功：'+(result.username||result.uid);message(qrState.value,'success');const d=await api('/api/config');cookieConfigured.value=d.cookie_configured;}
+   if(result.status==='success'){stopQR();qrImage.value='';qrLink.value='';qrState.value='扫码登录成功：'+(result.username||result.uid);message(qrState.value,'success');const d=await api('/api/config');cookieConfigured.value=d.cookie_configured;listenerCookies.value=d.listener_cookies||{};}
    else{qrState.value=result.message||'等待手机扫码';}
   }catch(e){stopQR();qrImage.value='';qrState.value=e.message;message('B站扫码：'+e.message,'error')}
   finally{qrPolling=false}
  }
- async function startQR(){stopQR();qrImage.value='';qrLink.value='';qrState.value='正在生成二维码…';try{
-  const r=await api('/api/bili/qr/start',{method:'POST',body:'{}'});
+ async function startQR(target='bilibili'){
+  if(typeof target!=='string')target='bilibili';
+  if(target!=='bilibili'){const saved=await saveConfig();if(!saved)return}
+  stopQR();qrImage.value='';qrLink.value='';qrInstanceId.value=target;qrState.value='正在生成二维码…';try{
+  const r=await api('/api/bili/qr/start',{method:'POST',body:JSON.stringify({instance_id:target})});
   qrImage.value=qrSVG(r.url);qrLink.value=r.url;qrState.value='使用哔哩哔哩手机 App 扫码，并在手机端确认登录';qrTimer=setInterval(pollQR,2500);
  }catch(e){qrState.value=e.message;message(e.message,'error')}}
- async function logoutBili(){if(!window.confirm('确认清除 Go 版已保存的 B站登录 Cookie？'))return;
-  stopQR();qrImage.value='';try{await api('/api/bili/logout',{method:'POST',body:'{}'});qrState.value='已清除登录会话';const d=await api('/api/config');cookieConfigured.value=d.cookie_configured;message('已清除 B站登录 Cookie','success')}catch(e){message(e.message,'error')}
+ async function logoutBili(target='bilibili'){
+  if(typeof target!=='string')target='bilibili';
+  if(!window.confirm('清除此直播间的 B站 Cookie 并关闭该房间监听？'))return;
+  stopQR();qrImage.value='';try{
+   await api('/api/bili/logout',{method:'POST',body:JSON.stringify({instance_id:target})});
+   qrState.value='已清除当前房间登录会话';await loadConfig();await refresh();
+   message('已清除所选房间 Cookie，其他房间不受影响','success');
+  }catch(e){message(e.message,'error')}
+
  }
  async function checkOnboarding(){try{const response=await api('/api/onboarding');wizardLoaded.value=true;if(!response.completed){wizardStep.value=0;wizardError.value='';if(config.value.bilibili?.room==='3049445'&&!config.value.bilibili.enabled)config.value.bilibili.room='';wizardOpen.value=true}}catch(e){message('读取首次配置向导状态失败：'+e.message,'error')}}
  function openWizard(){wizardStep.value=0;wizardOpen.value=true;wizardError.value='';wizardLoaded.value=true}
@@ -327,9 +355,9 @@ createApp({setup(){
  async function chooseStorage(choice){storageBusy.value=true;try{const result=await api('/api/storage/choice',{method:'POST',body:JSON.stringify({choice})});storageInfo.value={...storageInfo.value,choice:result.choice,conflict:false,restart_required:false};storageDecisionDismissed.value=true;message('已确认继续使用 bilipdj-go 独立目录；旧 Go 和 Python 数据未被覆盖。','success')}catch(e){message('保存存储选择失败：'+e.message,'error')}finally{storageBusy.value=false}}
  async function importPythonQueues(){if(!window.confirm('将 Python archives 目录中的排队 CSV 导入 Go 的对应槽位？Go 原存档将先备份，Python CSV 保持不变。'))return;storageBusy.value=true;try{const v=await api('/api/storage/python-queues/import',{method:'POST',body:'{}'});message(v.message||'存档已导入','success');await refresh()}catch(e){message('导入失败：'+e.message,'error')}finally{storageBusy.value=false}}
  async function exportPythonQueue(){try{const headers={};const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;const resp=await fetch('/api/storage/queue-export?slot='+Number(selectedSlot.value),{headers});if(!resp.ok)throw Error('HTTP '+resp.status);const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='queue_archive_slot_'+selectedSlot.value+'.csv';a.click();URL.revokeObjectURL(url)}catch(e){message('导出失败：'+e.message,'error')}}
- function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.platform]:event.data}}}catch{}}}
+ function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.instance_id||event.data.platform]:event.data}}}catch{}}}
  let autostartPoll=null;
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='settings'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
- return {autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
