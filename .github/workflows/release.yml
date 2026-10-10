@@ -68,6 +68,19 @@ jobs:
         run: |
           mkdir -p dist/package
           EXT=""; [[ "$GOOS" == windows ]] && EXT=.exe
+          if [[ "$GOOS" == windows ]]; then
+            # The committed ICO sources are Base64-encoded to keep them
+            # writable via the repository integration. Decode before build.
+            base64 --decode assets/bilipdj-go.ico.b64 > assets/bilipdj-go.ico
+            base64 --decode assets/bilipdj-go-tray.ico.b64 > assets/bilipdj-go-tray.ico
+            # Resource objects are scoped to the current Windows architecture.
+            # The other OS builds do not require go-winres or Windows SDKs.
+            go run github.com/tc-hib/go-winres@v0.3.3 simply \
+              --arch "$GOARCH" --out rsrc \
+              --manifest gui --icon assets/bilipdj-go.ico \
+              --product-name "BiliPDJ Go" \
+              --file-description "BiliPDJ Go live queue manager"
+          fi
           LDFLAGS="-s -w -X main.version=${RELEASE_TAG#v}"
           [[ "$GOOS" == windows ]] && LDFLAGS="$LDFLAGS -H=windowsgui"
           CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go${EXT}" .
@@ -78,6 +91,9 @@ jobs:
             CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${RELEASE_TAG#v}" -o "dist/package/bilipdj-go-mcp.exe" .
           fi
           cp README.md LICENSE NOTICE.md dist/package/
+          if [[ "$GOOS" == windows ]]; then
+            cp assets/bilipdj-go.ico assets/bilipdj-go-tray.ico dist/package/
+          fi
           cp -r third_party docs dist/package/
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             printf "BiliPDJ-Go MCP PREVIEW BUILD (not a release)\\nPR: #3\\nCommit: %s\\nVersion baseline: %s\\nNo GitHub tag or official Release is created by this workflow run.\\n" "$GITHUB_SHA" "${RELEASE_TAG#v}" > dist/package/PREVIEW_BUILD.txt
