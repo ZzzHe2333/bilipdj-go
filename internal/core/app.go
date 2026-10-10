@@ -209,7 +209,7 @@ func New(dataDir, version, repo string) *App {
 				a.queue = append([]QueueItem{}, a.slots[slotKey(a.config.ArchiveSlot)]...)
 			}
 			if p.Style != nil {
-				a.style = p.Style
+				for key, value := range p.Style { a.style[key] = value }
 			}
 			if p.Appearance != nil {
 				a.appearance = p.Appearance
