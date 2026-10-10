@@ -140,6 +140,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 		}
 	}
 	operator := a.isOperator(e)
+    queuePrivileged:=a.commandAllowed(e,"queue")
 	super := a.isSuperOperator(e)
 	if operator {
 		if super {
@@ -251,7 +252,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 	if input == "插队" && a.config.AutoQueue && (a.config.Switches == nil || a.config.Switches.Paidui) && a.useGiftCreditLocked(e, index) {
 		return true
 	}
-	if a.config.GiftQueue != nil && a.config.GiftQueue.GiftOnly && !operator && index < 0 {
+	if a.config.GiftQueue != nil && a.config.GiftQueue.GiftOnly && !queuePrivileged && index < 0 {
 		return false
 	}
 	if !a.config.AutoQueue || (a.config.Switches != nil && !a.config.Switches.Paidui) {
@@ -346,7 +347,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 			return false
 		}
 	}
-	if !allowed(mode) || len(a.queue) >= 10000 || (a.config.MaxQueue > 0 && len(a.queue) >= a.config.MaxQueue && !operator) || (!operator && !a.dailyCanJoin(e)) {
+	if !allowed(mode) || len(a.queue) >= 10000 || (a.config.MaxQueue > 0 && len(a.queue) >= a.config.MaxQueue && !queuePrivileged) || (!queuePrivileged && !a.dailyCanJoin(e)) {
 		return false
 	}
 	note := strings.TrimLeft(strings.TrimSpace(strings.TrimPrefix(input, prefix)), " ：:")
@@ -354,7 +355,7 @@ func (a *App) processDanmuCommandLocked(e live.Event) bool {
 		return false
 	}
 	a.queue = append(a.queue, QueueItem{Key: key, Platform: e.Platform, UserID: e.UserID, Username: e.Username, Mode: mode, Note: note, At: e.Time})
-	if !operator {
+	if !queuePrivileged {
 		a.dailyMarkJoin(e)
 	}
 	return true
