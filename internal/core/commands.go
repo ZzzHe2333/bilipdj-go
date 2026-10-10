@@ -69,7 +69,8 @@ func (a *App) isOperator(e live.Event) bool {
  return named(a.config.Admins,e.Username)||(e.Platform=="bilibili"&&e.IsRoomAdmin&&a.config.Switches!=nil&&a.config.Switches.RoomAdminOperator)
 }
 func (a *App) isGuard(e live.Event) bool {
- if e.Platform=="bilibili"&&e.GuardLevel>0{return true}
+ if e.Platform!="bilibili" {return false}
+ if e.GuardLevel>0{return true}
  if a.config.Permissions!=nil{
   p,ok:=a.config.effectiveEntry(e)
   return ok&&containsCap(p.Capabilities,"guard_insert")
