@@ -16,7 +16,7 @@ p{opacity:.6}
 <ol ref="scrollEl" :style="listStyle"><li v-for="(q,i) in displayQueue" :key="q.key" :style="itemStyle">
  <span class="rank" v-if="style.show_sequence">{{i+1}}.</span>
  <span class="entry" :style="entryAlignment"><span :style="entryTextStyle">{{q.username}}</span></span>
-</li></ol><p v-if="displayQueue.length===0">暂无观众排队</p></section></div>
+</li></ol></section></div>
 <script src="/vue.global.js"></script><script>
 const {createApp,ref,computed,onMounted,onUnmounted,nextTick,watch}=Vue;
 createApp({setup(){
@@ -70,8 +70,8 @@ const listStyle=computed(()=>{
 const entryTextStyle=computed(()=>style.value.queue_gradient_enabled?{
  background:'linear-gradient(90deg,'+safeColor(style.value.text_grad_start,'#ffffff')+','+safeColor(style.value.text_grad_end,'#aaccff')+')',
  WebkitBackgroundClip:'text',backgroundClip:'text',WebkitTextFillColor:'transparent'}:{});
-async function refreshStyle(){try{const r=await fetch('/api/style',{cache:'no-store'});if(r.ok)savedStyle.value=await r.json()}catch{}}
-async function loadQueue(){try{const r=await fetch('/api/queue',{cache:'no-store'});if(r.ok)queue.value=await r.json();const slots=await fetch('/api/queue/slots',{cache:'no-store'});if(slots.ok)activeSlot.value=(await slots.json()).active_slot||1}catch{}}
+async function refreshStyle(){try{const r=await fetch('/api/style',{cache:'no-store'});if(r.ok){const v=await r.json();if(JSON.stringify(v)!==JSON.stringify(savedStyle.value))savedStyle.value=v}}catch{}}
+async function loadQueue(){try{const r=await fetch('/api/queue',{cache:'no-store'});if(r.ok){const v=await r.json();if(JSON.stringify(v)!==JSON.stringify(queue.value))queue.value=v;}const slots=await fetch('/api/queue/slots',{cache:'no-store'});if(slots.ok)activeSlot.value=(await slots.json()).active_slot||1}catch{}}
 let scrollFrame=null,lastFrame=0,pauseUntil=0;
 function stopScrolling(){if(scrollFrame!==null)cancelAnimationFrame(scrollFrame);scrollFrame=null;lastFrame=0;pauseUntil=0}
 function scrollStep(ts){
@@ -106,7 +106,7 @@ onMounted(()=>{
  window.addEventListener('message',applyPreviewMessage);
  refreshStyle();loadQueue();
  events=new EventSource('/api/events');
- events.onmessage=e=>{try{const x=JSON.parse(e.data);if(x.type==='queue')queue.value=x.data;else if(x.type==='style')savedStyle.value=x.data}catch{}};
+ events.onmessage=e=>{try{const x=JSON.parse(e.data);if(x.type==='queue'){if(JSON.stringify(x.data)!==JSON.stringify(queue.value))queue.value=x.data;}else if(x.type==='style'){if(JSON.stringify(x.data)!==JSON.stringify(savedStyle.value))savedStyle.value=x.data;}}catch{}};
  stylePoll=setInterval(refreshStyle,8000);queuePoll=setInterval(loadQueue,25000);void restartScrolling();document.addEventListener('visibilitychange',restartScrolling);
 });
 watch([style,displayQueue],()=>{void restartScrolling()},{deep:true});
