@@ -37,7 +37,7 @@ func TestQueueReorderRequiresFullIdentityAndFreshOrdering(t *testing.T) {
   {after,before,200},
   {before,before,409},
  } {
-  w:=consoleRequest(t,app,"POST","/api/queue",map[string]any{"action":"reorder","keys":tc.keys,"before":tc.before})
+  w:=consoleRequest(t,app,"POST","/api/queue",map[string]any{"action":"reorder","keys":tc.keys,"before":tc.before,"slot":1})
   if w.Code!=tc.status{t.Fatalf("reorder %v returned %d: %s",tc.keys,w.Code,w.Body.String())}
  }
  if app.queue[0].Key!="manual:three"{t.Fatal("saved order not reflected")}
