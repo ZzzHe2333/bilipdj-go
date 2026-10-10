@@ -15,6 +15,43 @@ createApp({setup(){
  const storageInfo=ref({}),pythonSlots=ref({counts:{}}),storageDecisionDismissed=ref(false),storageBusy=ref(false);
  const logs=ref([]),logLevel=ref('ALL'),logCategory=ref('all'),logSearch=ref(''),autoScroll=ref(true),logListRef=ref(null),queueSearch=ref(''),selectedKey=ref('');
  const notice=ref(''),noticeLevel=ref('info'),busy=ref(false),streamReady=ref(false),now=ref(''),newName=ref(''),release=ref(null),updateSource=ref('auto'),updateReady=ref(null);
+ const queueEditing=ref(false),queueEditKey=ref(''),queueEditName=ref(''),queueEditNote=ref(''),queueEditSource=ref('');
+ const queueEditManual=computed(()=>{const q=queue.value.find(v=>v.key===queueEditKey.value);return !!q&&q.platform==='manual'&&/^(manual|admin):/.test(q.key)});
+ const sorting=ref(false),sortKeys=ref([]),sortBefore=ref([]),draggingKey=ref('');
+ const sortedQueue=computed(()=>sorting.value?sortKeys.value.map(k=>queue.value.find(q=>q.key===k)).filter(Boolean):queue.value);
+ function beginSorting(){if(busy.value)return;queueSearch.value='';sortBefore.value=queue.value.map(q=>q.key);sortKeys.value=[...sortBefore.value];sorting.value=true}
+ function cancelSorting(){sorting.value=false;sortKeys.value=[];sortBefore.value=[];draggingKey.value=''}
+ function sortStart(event,key){if(!sorting.value)return;draggingKey.value=key;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',key)}
+ function sortDrop(event,target){if(!sorting.value)return;event.preventDefault();const from=sortKeys.value.indexOf(draggingKey.value),to=sortKeys.value.indexOf(target);if(from<0||to<0||from===to)return;const n=[...sortKeys.value];n.splice(to,0,n.splice(from,1)[0]);sortKeys.value=n}
+ function sortOver(event){if(sorting.value)event.preventDefault()}
+ async function saveSorting(){
+  if(busy.value||!sorting.value)return;
+  busy.value=true;
+  try{
+   queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value})});
+   cancelSorting();message('已保存新的排队顺序','success');
+  }catch(e){message('排序未保存：'+e.message,'error');await refresh()}
+  finally{busy.value=false}
+ }
+ function openQueueEditor(q){
+  if(!q||sorting.value)return;
+  queueEditKey.value=q.key;selectedKey.value=q.key;
+  queueEditName.value=q.username||'';queueEditNote.value=q.note||'';
+  queueEditSource.value=q.platform==='manual'?q.source_platform||'':q.platform;
+  queueEditing.value=true;
+ }
+ async function saveQueueEditor(){
+  if(busy.value)return;
+  const q=queue.value.find(v=>v.key===queueEditKey.value);
+  if(!q){queueEditing.value=false;message('成员已变动，请刷新','error');return}
+  const payload={action:'edit',key:q.key,note:queueEditNote.value};
+  if(queueEditManual.value){payload.new_name=queueEditName.value.trim();payload.source_platform=queueEditSource.value}
+  busy.value=true;
+  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(payload)});queueEditing.value=false;message('排队信息已保存','success')}
+  catch(e){message(e.message,'error')}
+  finally{busy.value=false}
+ }
+
  const versions=ref([]),selectedVersion=ref(''),versionsError=ref(''),downloadProgress=ref(null),downloading=ref(false);
  const selectedRelease=computed(()=>versions.value.find(v=>v.version===selectedVersion.value)||null);
  const targetSize=computed(()=>selectedRelease.value?.size||release.value?.size||0);
@@ -159,7 +196,7 @@ createApp({setup(){
  const queueSourceLabel=q=>q.platform==='manual'?platformName(q.source_platform):platformName(q.platform);
  const logOrder={DEBUG:0,INFO:1,WARNING:2,ERROR:3,CRITICAL:4};
  const filteredLogs=computed(()=>logs.value.filter(l=>(logLevel.value==='ALL'||logOrder[l.level]>=logOrder[logLevel.value])&&(logCategory.value==='all'||l.category===logCategory.value)&&(!logSearch.value||`${l.level} ${l.category} ${l.message}`.toLowerCase().includes(logSearch.value.toLowerCase()))));
- const visibleQueue=computed(()=>queue.value.filter(q=>!queueSearch.value||`${q.username} ${q.note} ${q.mode} ${q.platform} ${q.source_platform||''} ${q.user_id}`.toLowerCase().includes(queueSearch.value.toLowerCase())));
+ const visibleQueue=computed(()=>sortedQueue.value.filter(q=>!queueSearch.value||`${q.username} ${q.note} ${q.mode} ${q.platform} ${q.source_platform||''} ${q.user_id}`.toLowerCase().includes(queueSearch.value.toLowerCase())));
  const selectedIndex=computed(()=>queue.value.findIndex(q=>q.key===selectedKey.value));
  const connectedCount=computed(()=>[...monitorPlatforms.value,...extraMonitorPlatforms.value].filter(p=>statuses.value[p.instanceId||p.id]?.connected).length);
  const filteredMessages=computed(()=>[...messages.value].reverse().filter(m=>filter.value==='all'||filter.value===m.platform));
@@ -229,14 +266,14 @@ createApp({setup(){
  }
  async function saveObsStyle(){busy.value=true;try{await api('/api/style',{method:'POST',body:JSON.stringify(obsStyle.value)});message('OBS 样式已保存','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
  async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(body)});if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value=''}catch(e){message(e.message,'error')}}
- async function changeSlot(){try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
+ async function changeSlot(){cancelSorting();queueEditing.value=false;try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
  async function insertQueue(){if(!newName.value)return;const name=newName.value;const index=selectedIndex.value<0?0:selectedIndex.value+1;await queueAction({action:'insert',name,index});newName.value=''}
  async function moveSelected(delta){if(selectedIndex.value<0)return;await moveQueue(queue.value[selectedIndex.value],selectedIndex.value+delta)}
  async function editSelected(){if(selectedIndex.value<0)return;await editQueue(queue.value[selectedIndex.value])}
  async function removeSelected(){if(selectedIndex.value<0)return;const q=queue.value[selectedIndex.value];if(window.confirm('确认移除 '+q.username+'？'))await removeQueue(q.key)}
  async function completeFirst(){if(!queue.value.length)return;if(window.confirm('确认完成并移除队首 '+queue.value[0].username+'？'))await queueAction({action:'remove',key:queue.value[0].key})}
  async function moveQueue(q,index){await queueAction({action:'move',key:q.key,index:index})}
- async function editQueue(q){const note=window.prompt('修改 '+q.username+' 的备注',q.note||'');if(note!==null)await queueAction({action:'edit',key:q.key,note})}
+ async function editQueue(q){openQueueEditor(q)}
  async function addQueue(){if(!newName.value)return;await queueAction({action:'add',name:newName.value});newName.value=''}
  function removeQueue(key){queueAction({action:'remove',key})}
  function clearQueue(){if(window.confirm('确认清空当前全部排队？'))queueAction({action:'clear'})}
@@ -359,5 +396,5 @@ createApp({setup(){
  let autostartPoll=null;
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='settings'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
- return {listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
