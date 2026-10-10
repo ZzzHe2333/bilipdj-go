@@ -142,12 +142,18 @@
 <template v-else><div class="page-title"><div><p class="eyebrow">RELEASE MANAGEMENT</p><h1>检查并安装软件更新</h1><p class="muted">检查版本、下载、校验、备份旧程序、自动替换并重启。Windows 可直接在托盘运行时更新。</p></div></div>
 <article class="panel updates">
 <span class="meta">当前版本</span><h2>v{{status.version||'0.1.0'}}</h2>
-<label>更新下载线路<select v-model="updateSource" :disabled="busy"><option value="auto">自动（官方优先，失败使用加速）</option><option value="official">GitHub 官方直连</option><option value="accelerated">第三方加速 GH-Proxy</option></select></label>
+<label>更新下载线路<select v-model="updateSource" :disabled="busy"><option value="auto">自动（官方优先，失败使用加速）</option><option value="official">GitHub 官方直连</option><option value="accelerated">第三方加速（六节点自动切换）</option>
+<option value="gh-proxy-com">GH-Proxy.com</option>
+<option value="gh-proxy-org">GH-Proxy.org</option>
+<option value="akams">公益加速 · github.akams.cn</option>
+<option value="ghfile">公益加速 · ghfile.geekertao.top</option>
+<option value="github-dpik">公益加速 · github.dpik.top</option>
+<option value="gh-dpik">公益加速 · gh.dpik.top</option></select></label>
 <button class="btn primary" :disabled="busy" @click="checkUpdate">{{busy?'正在处理…':'检查更新'}}</button>
-<div v-if="release" class="release"><b>最新版本：{{release.version}}</b><p>发现线路：{{release.source==='accelerated'?'第三方加速':'GitHub 官方'}}</p><p>目标发行包：{{release.asset||'当前系统暂未发布对应程序'}}</p><p>{{release.update_available?'发现新版本，可以下载后直接安装。':'没有比当前程序更新的可安装版本。'}}</p>
+<div v-if="release" class="release"><b>最新版本：{{release.version}}</b><p>发现线路：{{({official:'GitHub 官方',accelerated:'第三方加速池',akams:'github.akams.cn',ghfile:'ghfile.geekertao.top','github-dpik':'github.dpik.top','gh-dpik':'gh.dpik.top','gh-proxy-com':'GH-Proxy.com','gh-proxy-org':'GH-Proxy.org'})[release.source]||release.source}}</p><p>目标发行包：{{release.asset||'当前系统暂未发布对应程序'}}</p><p>{{release.update_available?'发现新版本，可以下载后直接安装。':'没有比当前程序更新的可安装版本。'}}</p>
 <button v-if="release.update_available" class="btn" :disabled="busy" @click="downloadUpdate">{{busy?'下载中…':'下载并验证 SHA-256'}}</button>
 <div v-if="updateReady"><p>准备安装：{{updateReady.version}} · {{updateReady.sha256.slice(0,12)}}…</p><button class="btn primary" :disabled="busy" @click="installUpdate">安装更新并重启</button></div>
-</div><p class="tip">自动更新需要可写的程序安装目录。下载使用官方 Release 或所选第三方代理；SHA-256 只校验文件完整性，第三方代理不具备官方签名保证。请只使用信任的线路。Docker 请通过重新构建/拉取镜像升级。</p>
+</div><p class="tip">自动更新需要可写的程序安装目录。下载使用官方 Release 或所选第三方代理；SHA-256 只校验文件完整性，代理线路提供文件中转，但并非 GitHub 官方或软件签名机构；SHA-256 可验证传输一致性，却无法证明代理未同时篡改清单与 ZIP。优先使用官方源或自行核对 GitHub 官方校验和。Docker 请通过重新构建/拉取镜像升级。</p>
 </article></template>
 </main><footer>BiliPDJ Go · 本地优先 · 仅供直播管理使用</footer></div>
 <div v-if="storageInfo.conflict&&!storageDecisionDismissed" class="wizard-backdrop" role="presentation"><section class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="storage-conflict-title"><div class="wizard-top"><div><p class="eyebrow">STORAGE CONFLICT</p><h2 id="storage-conflict-title">检测到两份用户数据</h2></div></div><div class="wizard-body"><p>发现新的 bilipdj-go 目录与旧版 Go 数据不一致。当前只读取独立 Go 目录，不会自动覆盖新存档，也不会写入 Python 的 bilipdj 目录。</p><div class="storage-paths"><div><strong>旧版</strong><code>{{storageInfo.legacy}}</code></div><div><strong>系统用户目录</strong><code>{{storageInfo.user}}</code></div></div><p class="tip">建议先备份两份 Go 数据。确认仅关闭警告，继续使用当前 bilipdj-go 数据，不自动合并任何文件。</p></div><div class="wizard-footer"><button class="btn" @click="storageDecisionDismissed=true">暂不确认（保持现有 Go 数据）</button><span class="wizard-spacer"></span><button class="btn primary" :disabled="storageBusy" @click="chooseStorage('user')">确认使用 Go 独立目录</button></div></section></div>
