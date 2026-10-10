@@ -12,16 +12,21 @@ li{display:flex;gap:12px;align-items:center;transition:transform .2s,opacity .2s
 p{opacity:.6}
 </style></head><body><div id="app" v-cloak>
 <section class="board" :class="{'no-header':style.show_header===false}" :style="boardStyle">
-<header v-if="style.show_header!==false">实时排队 <small>{{queue.length}} 人 · 槽位 {{activeSlot}}</small></header>
-<ol ref="scrollEl"><li v-for="(q,i) in queue" :key="q.key" :style="itemStyle">
+<header v-if="style.show_header!==false">实时排队 <small>{{displayQueue.length}} 人 · 槽位 {{activeSlot}}</small></header>
+<ol ref="scrollEl"><li v-for="(q,i) in displayQueue" :key="q.key" :style="itemStyle">
  <span class="rank" v-if="style.show_sequence">{{i+1}}.</span>
  <span class="entry" :style="entryAlignment"><span :style="entryTextStyle"><span v-if="q.mode">[{{q.mode}}] </span>{{q.username}}<span v-if="q.note" class="note"> · {{q.note}}</span></span></span>
  <small class="badge" v-if="style.show_platform!==false">{{queueSourceLabel(q)}}</small>
-</li></ol><p v-if="queue.length===0">暂无观众排队</p></section></div>
+</li></ol><p v-if="displayQueue.length===0">暂无观众排队</p></section></div>
 <script src="/vue.global.js"></script><script>
 const {createApp,ref,computed,onMounted,onUnmounted,nextTick}=Vue;
 createApp({setup(){
-const queue=ref([]),activeSlot=ref(1),savedStyle=ref({}),previewStyle=ref(null),scrollEl=ref(null);
+const queue=ref([]),activeSlot=ref(1),savedStyle=ref({}),previewStyle=ref(null),scrollEl=ref(null),demoMode=ref(false);
+const demoEntries=[
+ {key:'obs-demo-1',username:'预览用户 A',note:'这里显示排队内容',platform:'manual',source_platform:''},
+ {key:'obs-demo-2',username:'预览用户 B',note:'可拖动字号滑块',platform:'bilibili'}
+];
+const displayQueue=computed(()=>demoMode.value&&queue.value.length===0?demoEntries:queue.value);
 const style=computed(()=>previewStyle.value??savedStyle.value);
 function numeric(key,fallback,min,max){const v=style.value[key];const n=Number(v);return v!==null&&v!==undefined&&v!==''&&Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback}
 function safeColor(v,fallback){return typeof v==='string'&&(/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)||/^rgba?\([\d., %]+\)$/.test(v))?v:fallback}
@@ -66,8 +71,8 @@ function applyPreviewMessage(event){
  if(window.parent===window||event.source!==window.parent||event.origin!==window.location.origin)return;
  if(event.data?.type!=='bilipdj:obs-preview-style')return;
  const v=event.data.style;
- if(v===null){previewStyle.value=null;return;}
- if(v&&typeof v==='object'&&!Array.isArray(v))previewStyle.value={...v};
+ if(v===null){previewStyle.value=null;demoMode.value=false;return;}
+ if(v&&typeof v==='object'&&!Array.isArray(v)){previewStyle.value={...v};demoMode.value=true;}
 }
 let events,stylePoll,queuePoll,scrollTimer;
 onMounted(()=>{
@@ -78,6 +83,6 @@ onMounted(()=>{
  stylePoll=setInterval(refreshStyle,8000);queuePoll=setInterval(loadQueue,25000);scrollTimer=setInterval(scrollQueue,80);
 });
 onUnmounted(()=>{window.removeEventListener('message',applyPreviewMessage);events?.close();clearInterval(stylePoll);clearInterval(queuePoll);clearInterval(scrollTimer)});
-return {queue,activeSlot,style,itemStyle,boardStyle,entryAlignment,entryTextStyle,platformName,queueSourceLabel,scrollEl};
+return {queue,displayQueue,activeSlot,style,itemStyle,boardStyle,entryAlignment,entryTextStyle,platformName,queueSourceLabel,scrollEl};
 }}).mount('#app');
 </script></body></html>
