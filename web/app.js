@@ -6,6 +6,46 @@ createApp({setup(){
  const autostart=ref({supported:false,enabled:false,note:'正在检测系统登录启动项…'}),autostartLoading=ref(false),autostartBusy=ref(false),autostartError=ref('');
  const config=ref({listeners:[],bilibili:{room:'',cookie:'',enabled:false},douyin:{room:'',cookie:'',enabled:false},auto_queue:true,command:'排队',gift_queue:{enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false}});
  const obsStyle=ref({transparent_background:true}),obsPreviewFrame=ref(null),obsPreviewBackdrop=ref('checker');
+ const styleSlot=ref(1),styleSlots=ref([]),previewOpen=ref(true),previewPosition=ref({x:80,y:130});
+ const previewPositionStyle=computed(()=>({left:previewPosition.value.x+'px',top:previewPosition.value.y+'px'}));
+ let dragOffset=null;
+ function previewDragStart(e){
+  if(e.button!==0)return;
+  const rect=e.currentTarget.parentElement.getBoundingClientRect();
+  dragOffset={x:e.clientX-rect.left,y:e.clientY-rect.top};
+  e.currentTarget.setPointerCapture(e.pointerId);
+ }
+ function previewDragMove(e){
+  if(!dragOffset)return;
+  const box=e.currentTarget.parentElement;
+  previewPosition.value={x:Math.max(0,Math.min(window.innerWidth-box.offsetWidth,e.clientX-dragOffset.x)),
+    y:Math.max(0,Math.min(window.innerHeight-box.offsetHeight,e.clientY-dragOffset.y))};
+ }
+ function previewDragEnd(){dragOffset=null}
+ async function refreshStyleSlots(){
+  try{styleSlots.value=await api('/api/style/slots',{cache:'no-store'})}
+  catch(e){message('读取样式槽位失败：'+e.message,'error')}
+ }
+ async function saveStyleSlot(){
+  busy.value=true;
+  try{await api('/api/style/slots/'+styleSlot.value,{method:'POST',body:JSON.stringify(obsStyle.value)});
+   await refreshStyleSlots();message('已保存样式存档 '+styleSlot.value,'success')
+  }catch(e){message(e.message,'error')}finally{busy.value=false}
+ }
+ async function previewStyleSlot(){
+  try{const v=await api('/api/style/slots/'+styleSlot.value,{cache:'no-store'});
+   obsStyle.value={...v.style};message('已载入样式存档 '+styleSlot.value+'，尚未应用到 OBS','success')
+  }catch(e){message(e.message,'error')}
+ }
+ async function applyStyleSlot(){
+  if(!window.confirm('将样式存档 '+styleSlot.value+' 应用到 OBS 展示？'))return;
+  busy.value=true;
+  try{const v=await api('/api/style/slots/'+styleSlot.value+'/apply',{method:'POST',body:'{}'});
+   obsStyle.value={...v.style};message('OBS 已使用样式存档 '+styleSlot.value,'success')
+  }catch(e){message(e.message,'error')}finally{busy.value=false}
+ }
+ watch(page,p=>{if(p==='overlay'){previewOpen.value=true;void refreshStyleSlots()}});
+
  const obsURL=computed(()=>window.location.origin+'/index');
  const giftStatus=ref(null), giftNamesText=ref('');
  const qrImage=ref(''), qrState=ref(''), qrLink=ref('');let qrTimer=null, qrPolling=false;
@@ -396,5 +436,5 @@ createApp({setup(){
  let autostartPoll=null;
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='settings'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
- return {queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
+ return {styleSlot,styleSlots,previewOpen,previewPosition,previewPositionStyle,previewDragStart,previewDragMove,previewDragEnd,refreshStyleSlots,saveStyleSlot,previewStyleSlot,applyStyleSlot,queueEditing,queueEditKey,queueEditName,queueEditNote,queueEditSource,queueEditManual,openQueueEditor,saveQueueEditor,sorting,sortKeys,sortBefore,draggingKey,beginSorting,cancelSorting,sortStart,sortDrop,sortOver,saveSorting,listenerCookies,qrInstanceId,extraMonitorPlatforms,addExtraListener,removeExtraListener,normalizeExtraDouyin,autostart,autostartLoading,autostartBusy,autostartError,loadAutostart,setAutostart,versions,selectedVersion,selectedRelease,versionsError,downloadProgress,downloading,targetSize,canDownloadTarget,fmtMiB,progressPhase,loadVersionHistory,perfInterval,perfData,perfError,perfLoading,perfCards,perfSliderPosition,setPerfInterval,setPerfSlider,formatPerfValue,perfTime,refreshPerfNow,platformCatalog,configuredPlatforms,addablePlatforms,monitorPlatforms,enabledMonitorCount,showPlatformPicker,addPlatform,removePlatform,normalizeDouyinField,page,storageInfo,pythonSlots,storageDecisionDismissed,storageBusy,loadStorage,loadPythonSlots,chooseStorage,importPythonQueues,exportPythonQueue,wizardOpen,wizardStep,wizardBusy,wizardLoaded,wizardError,openWizard,closeWizard,finishWizard,logs,logLevel,logCategory,logSearch,autoScroll,logListRef,filteredLogs,logCategoryName,refreshLogs,copyLogs,exportLogs,clearLogView,queueSearch,selectedKey,selectedIndex,visibleQueue,platformName,queueSourceLabel,insertQueue,moveSelected,editSelected,removeSelected,completeFirst,status,statuses,config,cookieConfigured,messages,queue,filter,notice,noticeLevel,busy,streamReady,now,newName,release,platforms,filters,connectedCount,filteredMessages,dateTime,refresh,saveConfig,addQueue,removeQueue,clearQueue,moveQueue,editQueue,changeSlot,slotInfo,selectedSlot,checkUpdate,downloadUpdate,installUpdate,updateSource,updateReady,giftStatus,giftNamesText,loadGiftStatus,obsStyle,obsPreviewFrame,obsPreviewBackdrop,obsURL,sendObsPreview,copyObsURL,loadObsStyle,saveObsStyle,legacyFile,legacyPreview,blacklistText,adminsText,superAdminsText,guardsText,selectLegacyFile,legacyAction,qrImage,qrLink,qrState,startQR,logoutBili};
 }}).mount('#app');
