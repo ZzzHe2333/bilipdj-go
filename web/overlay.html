@@ -11,21 +11,17 @@ li{display:flex;gap:12px;align-items:center;transition:transform .2s,opacity .2s
 .badge{font-size:12px;opacity:.75;flex:none;display:inline-flex;justify-content:center;align-items:center;min-width:50px;text-align:center}
 p{opacity:.6}
 </style></head><body><div id="app" v-cloak>
-<section class="board" :class="{'no-header':style.show_header===false}" :style="boardStyle">
-<header v-if="style.show_header!==false">实时排队 <small>{{displayQueue.length}} 人 · 槽位 {{activeSlot}}</small></header>
-<ol ref="scrollEl"><li v-for="(q,i) in displayQueue" :key="q.key" :style="itemStyle">
+<section class="board" :class="{'no-header':style.obs_show_header!==true}" :style="boardStyle">
+<header v-if="style.obs_show_header===true">实时排队 <small>{{displayQueue.length}} 人 · 槽位 {{activeSlot}}</small></header>
+<ol ref="scrollEl" :style="listStyle"><li v-for="(q,i) in displayQueue" :key="q.key" :style="itemStyle">
  <span class="rank" v-if="style.show_sequence">{{i+1}}.</span>
- <span class="entry" :style="entryAlignment"><span :style="entryTextStyle"><span v-if="q.mode">[{{q.mode}}] </span>{{q.username}}<span v-if="q.note" class="note"> · {{q.note}}</span></span></span>
- <small class="badge" v-if="style.show_platform!==false">{{queueSourceLabel(q)}}</small>
-</li></ol><p v-if="displayQueue.length===0">暂无观众排队</p></section></div>
+ <span class="entry" :style="entryAlignment"><span :style="entryTextStyle">{{q.username}}</span></span>
+</li></ol></section></div>
 <script src="/vue.global.js"></script><script>
-const {createApp,ref,computed,onMounted,onUnmounted,nextTick}=Vue;
+const {createApp,ref,computed,onMounted,onUnmounted,nextTick,watch}=Vue;
 createApp({setup(){
 const queue=ref([]),activeSlot=ref(1),savedStyle=ref({}),previewStyle=ref(null),scrollEl=ref(null),demoMode=ref(false);
-const demoEntries=[
- {key:'obs-demo-1',username:'预览用户 A',note:'这里显示排队内容',platform:'manual',source_platform:''},
- {key:'obs-demo-2',username:'预览用户 B',note:'可拖动字号滑块',platform:'bilibili'}
-];
+const demoEntries=['预览用户 01','预览用户 02','预览用户 03','预览用户 04','预览用户 05','预览用户 06','预览用户 07','预览用户 08','预览用户 09','预览用户 10','预览用户 11','预览用户 12'].map((username,i)=>({key:'obs-demo-'+i,username}));
 const displayQueue=computed(()=>demoMode.value&&queue.value.length===0?demoEntries:queue.value);
 const style=computed(()=>previewStyle.value??savedStyle.value);
 function numeric(key,fallback,min,max){const v=style.value[key];const n=Number(v);return v!==null&&v!==undefined&&v!==''&&Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback}
@@ -61,12 +57,40 @@ const itemStyle=computed(()=>({
  textShadow:style.value.text_stroke_enabled?'0 1px 2px #0007':'none'
 }));
 const entryAlignment=computed(()=>({textAlign:['left','center','right'].includes(style.value.queue_text_align)?style.value.queue_text_align:'left'}));
+const listStyle=computed(()=>{
+ const font=numeric('queue_font_size',50,10,200);
+ const line=numeric('queue_line_height',1.2,.8,3);
+ const row=font*line+2*numeric('queue_item_padding_y',8,0,100)+numeric('queue_item_gap',10,0,100);
+ const count=Math.round(numeric('queue_visible_count',5,1,100));
+ return {maxHeight:'min(100%, '+Math.ceil(row*count)+'px)',overflowY:'auto'};
+});
 const entryTextStyle=computed(()=>style.value.queue_gradient_enabled?{
  background:'linear-gradient(90deg,'+safeColor(style.value.text_grad_start,'#ffffff')+','+safeColor(style.value.text_grad_end,'#aaccff')+')',
  WebkitBackgroundClip:'text',backgroundClip:'text',WebkitTextFillColor:'transparent'}:{});
-async function refreshStyle(){try{const r=await fetch('/api/style',{cache:'no-store'});if(r.ok)savedStyle.value=await r.json()}catch{}}
-async function loadQueue(){try{const r=await fetch('/api/queue',{cache:'no-store'});if(r.ok)queue.value=await r.json();const slots=await fetch('/api/queue/slots',{cache:'no-store'});if(slots.ok)activeSlot.value=(await slots.json()).active_slot||1}catch{}}
-async function scrollQueue(){if(!style.value.auto_scroll||!scrollEl.value)return;await nextTick();const el=scrollEl.value;el.scrollTop=el.scrollTop>=el.scrollHeight-el.clientHeight-2?0:Math.min(el.scrollHeight-el.clientHeight,el.scrollTop+1)}
+async function refreshStyle(){try{const r=await fetch('/api/style',{cache:'no-store'});if(r.ok){const v=await r.json();if(JSON.stringify(v)!==JSON.stringify(savedStyle.value))savedStyle.value=v}}catch{}}
+async function loadQueue(){try{const r=await fetch('/api/queue',{cache:'no-store'});if(r.ok){const v=await r.json();if(JSON.stringify(v)!==JSON.stringify(queue.value))queue.value=v;}const slots=await fetch('/api/queue/slots',{cache:'no-store'});if(slots.ok)activeSlot.value=(await slots.json()).active_slot||1}catch{}}
+let scrollFrame=null,lastFrame=0,pauseUntil=0;
+function stopScrolling(){if(scrollFrame!==null)cancelAnimationFrame(scrollFrame);scrollFrame=null;lastFrame=0;pauseUntil=0}
+function scrollStep(ts){
+ scrollFrame=null;
+ if(!style.value.auto_scroll||!scrollEl.value||document.hidden)return;
+ const el=scrollEl.value,max=Math.max(0,el.scrollHeight-el.clientHeight);
+ if(max<=1){lastFrame=0;return}
+ if(pauseUntil>0&&ts>=pauseUntil){
+  el.scrollTop=0;pauseUntil=0;lastFrame=ts;
+ }else if(pauseUntil===0){
+  const delta=lastFrame===0?0:Math.min(0.1,(ts-lastFrame)/1000);
+  el.scrollTop=Math.min(max,el.scrollTop+numeric('queue_scroll_speed',30,1,300)*delta);
+  if(el.scrollTop>=max-1)pauseUntil=ts+1400;
+ }
+ lastFrame=ts;
+ scrollFrame=requestAnimationFrame(scrollStep);
+}
+async function restartScrolling(){
+ stopScrolling();await nextTick();
+ if(style.value.auto_scroll&&!document.hidden&&scrollEl.value){scrollEl.value.scrollTop=0;scrollFrame=requestAnimationFrame(scrollStep)}
+}
+
 function applyPreviewMessage(event){
  if(window.parent===window||event.source!==window.parent||event.origin!==window.location.origin)return;
  if(event.data?.type!=='bilipdj:obs-preview-style')return;
@@ -74,15 +98,16 @@ function applyPreviewMessage(event){
  if(v===null){previewStyle.value=null;demoMode.value=false;return;}
  if(v&&typeof v==='object'&&!Array.isArray(v)){previewStyle.value={...v};demoMode.value=true;}
 }
-let events,stylePoll,queuePoll,scrollTimer;
+let events,stylePoll,queuePoll;
 onMounted(()=>{
  window.addEventListener('message',applyPreviewMessage);
  refreshStyle();loadQueue();
  events=new EventSource('/api/events');
- events.onmessage=e=>{try{const x=JSON.parse(e.data);if(x.type==='queue')queue.value=x.data;else if(x.type==='style')savedStyle.value=x.data}catch{}};
- stylePoll=setInterval(refreshStyle,8000);queuePoll=setInterval(loadQueue,25000);scrollTimer=setInterval(scrollQueue,80);
+ events.onmessage=e=>{try{const x=JSON.parse(e.data);if(x.type==='queue'){if(JSON.stringify(x.data)!==JSON.stringify(queue.value))queue.value=x.data;}else if(x.type==='style'){if(JSON.stringify(x.data)!==JSON.stringify(savedStyle.value))savedStyle.value=x.data;}}catch{}};
+ stylePoll=setInterval(refreshStyle,8000);queuePoll=setInterval(loadQueue,25000);void restartScrolling();document.addEventListener('visibilitychange',restartScrolling);window.addEventListener('resize',restartScrolling);
 });
-onUnmounted(()=>{window.removeEventListener('message',applyPreviewMessage);events?.close();clearInterval(stylePoll);clearInterval(queuePoll);clearInterval(scrollTimer)});
-return {queue,displayQueue,activeSlot,style,itemStyle,boardStyle,entryAlignment,entryTextStyle,platformName,queueSourceLabel,scrollEl};
+watch([style,displayQueue],()=>{void restartScrolling()},{deep:true});
+onUnmounted(()=>{window.removeEventListener('message',applyPreviewMessage);document.removeEventListener('visibilitychange',restartScrolling);window.removeEventListener('resize',restartScrolling);events?.close();clearInterval(stylePoll);clearInterval(queuePoll);stopScrolling()});
+return {queue,displayQueue,activeSlot,style,itemStyle,boardStyle,entryAlignment,entryTextStyle,platformName,queueSourceLabel,listStyle,scrollEl};
 }}).mount('#app');
 </script></body></html>

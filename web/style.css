@@ -125,3 +125,19 @@
  .perf-control-header .btn{width:100%}
  .perf-info{padding:14px}
 }
+
+/* Download progress and historical rollback chooser. */
+.update-history{padding:18px 0;border-top:1px solid var(--line);margin-top:16px}
+.update-history-head{display:flex;align-items:start;justify-content:space-between;gap:15px;flex-wrap:wrap}
+.update-history h3{font-size:16px;margin:0 0 8px}
+.update-history .tip{margin:6px 0 12px}
+.update-history label{display:grid;gap:7px;max-width:600px;font-size:13px;color:var(--dim);margin:14px 0}
+.update-history select{display:block;width:100%;max-width:100%;min-height:44px;padding:10px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;font-size:15px}
+.update-history .warning{color:#eaba7d}
+.update-transfer{margin:18px 0;padding:17px;background:var(--panel2);border:1px solid var(--line);border-radius:10px}
+.update-transfer-title{display:flex;align-items:center;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums;margin-bottom:12px}
+.update-transfer progress{width:100%;display:block;height:17px;accent-color:var(--accent);border-radius:10px;overflow:hidden}
+.update-transfer-stats{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:13px;font-variant-numeric:tabular-nums}
+.update-transfer .tip{margin:11px 0 0;overflow-wrap:anywhere}
+.update-ready{border-top:1px solid var(--line);padding-top:15px;margin-top:14px}
+@media(max-width:700px){.update-history-head .btn{width:100%}.update-transfer-stats{display:grid}.update-history label{max-width:100%}}

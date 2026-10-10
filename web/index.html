@@ -150,10 +150,11 @@
  <label>条目水平留白（px）<input type="number" min="0" max="120" v-model.number="obsStyle.queue_item_padding_x"></label>
  <label>条目垂直留白（px）<input type="number" min="0" max="100" v-model.number="obsStyle.queue_item_padding_y"></label>
  <label>背景圆角（px）<input type="number" min="0" max="60" v-model.number="obsStyle.board_radius"></label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_header">显示标题及存档</label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_sequence">显示序号</label>
- <label class="check"><input type="checkbox" v-model="obsStyle.show_platform">显示来源平台</label>
- <label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">自动滚动</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.obs_show_header">显示标题与存档（默认关闭）</label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.show_sequence">显示序号（默认仅用户名）</label>
+ <label>最多同时显示人数<input type="number" min="1" max="100" v-model.number="obsStyle.queue_visible_count"></label>
+ <label class="check"><input type="checkbox" v-model="obsStyle.auto_scroll">开启列表自动滚动</label>
+ <label>滚动速度（像素/秒）<input type="range" min="1" max="300" step="1" v-model.number="obsStyle.queue_scroll_speed"><input type="number" min="1" max="300" v-model.number="obsStyle.queue_scroll_speed"></label>
 </fieldset><fieldset><legend>色彩与效果</legend>
  <label class="check obs-important-check"><input type="checkbox" v-model="obsStyle.transparent_background">纯透明背景（推荐，原版 OBS 样式）</label>
  <p class="tip">勾选后整个页面的背景 Alpha 为 0，即使以前存档设置过深色看板也会保持透明。</p>
@@ -170,7 +171,7 @@
  <label>文字渐变结束色<input v-model.trim="obsStyle.text_grad_end" placeholder="#aaccff"></label>
 </fieldset></div>
 <div class="manual obs-editor-actions"><button class="btn primary" :disabled="busy" @click="saveObsStyle">保存并应用到 OBS</button><button class="btn" @click="loadObsStyle">恢复已保存样式</button></div>
-<div class="obs-preview-toolbar"><div><strong>实时效果预览</strong><p class="tip">调整上方字号或颜色即刻变化；仅在设置页显示棋盘格，实际 OBS 不包含棋盘格背景。如果队列为空，将显示两名演示成员。</p></div><label>预览底色<select v-model="obsPreviewBackdrop"><option value="checker">透明棋盘格</option><option value="dark">暗色背景</option><option value="light">亮色背景</option><option value="green">绿色背景</option></select></label></div>
+<div class="obs-preview-toolbar"><div><strong>实时效果预览</strong><p class="tip">调整上方字号或颜色即刻变化；仅在设置页显示棋盘格，实际 OBS 不包含棋盘格背景。如果队列为空，将显示十二名演示成员，用于预览显示人数和滚动速度。</p></div><label>预览底色<select v-model="obsPreviewBackdrop"><option value="checker">透明棋盘格</option><option value="dark">暗色背景</option><option value="light">亮色背景</option><option value="green">绿色背景</option></select></label></div>
 <div class="obs-preview-stage" :class="'obs-backdrop-'+obsPreviewBackdrop"><iframe class="obs-preview" ref="obsPreviewFrame" title="OBS 透明实时预览" src="/index" @load="sendObsPreview"></iframe></div>
 <div class="obs-url-box"><label for="obs-url-field">OBS 浏览器源 URL<input id="obs-url-field" type="text" readonly :value="obsURL" @focus="$event.target.select()"></label><div class="quick-actions"><button class="btn primary small" @click="copyObsURL">复制浏览器源地址</button><a class="btn small" href="/index" target="_blank" rel="noopener">打开透明源 ↗</a></div></div></article>
 <section class="panel log-footer-panel"><strong>使用方法</strong><p class="tip">OBS → 添加「浏览器源」→ 把上方地址复制到 URL。以前 Python Web 版的 <code>/index</code> 地址已经兼容，之前 Go 的 <code>/overlay.html</code> 也继续有效。不同端口或远程访问请使用实际访问本程序的主机和端口；直接在系统浏览器中查看透明页面时，浏览器自身背景可能显示白色或黑色，透明度应在 OBS 中或上面的棋盘格预览确认。</p></section>
@@ -186,10 +187,37 @@
 <option value="github-dpik">公益加速 · github.dpik.top</option>
 <option value="gh-dpik">公益加速 · gh.dpik.top</option></select></label>
 <button class="btn primary" :disabled="busy" @click="checkUpdate">{{busy?'正在处理…':'检查更新'}}</button>
-<div v-if="release" class="release"><b>最新版本：{{release.version}}</b><p>发现线路：{{({official:'GitHub 官方',accelerated:'第三方加速池',akams:'github.akams.cn',ghfile:'ghfile.geekertao.top','github-dpik':'github.dpik.top','gh-dpik':'gh.dpik.top','gh-proxy-com':'GH-Proxy.com','gh-proxy-org':'GH-Proxy.org'})[release.source]||release.source}}</p><p>目标发行包：{{release.asset||'当前系统暂未发布对应程序'}}</p><p>{{release.update_available?'发现新版本，可以下载后直接安装。':'没有比当前程序更新的可安装版本。'}}</p>
-<button v-if="release.update_available" class="btn" :disabled="busy" @click="downloadUpdate">{{busy?'下载中…':'下载并验证 SHA-256'}}</button>
-<div v-if="updateReady"><p>准备安装：{{updateReady.version}} · {{updateReady.sha256.slice(0,12)}}…</p><button class="btn primary" :disabled="busy" @click="installUpdate">安装更新并重启</button></div>
-</div><p class="tip">自动更新需要可写的程序安装目录。下载使用官方 Release 或所选第三方代理；SHA-256 只校验文件完整性，代理线路提供文件中转，但并非 GitHub 官方或软件签名机构；SHA-256 可验证传输一致性，却无法证明代理未同时篡改清单与 ZIP。优先使用官方源或自行核对 GitHub 官方校验和。Docker 请通过重新构建/拉取镜像升级。</p>
+<div v-if="release" class="release">
+ <b>最新版本：{{release.version}}</b>
+ <p>检查线路：{{({official:'GitHub 官方',accelerated:'第三方加速池',akams:'github.akams.cn',ghfile:'ghfile.geekertao.top','github-dpik':'github.dpik.top','gh-dpik':'gh.dpik.top','gh-proxy-com':'GH-Proxy.com','gh-proxy-org':'GH-Proxy.org'})[release.source]||release.source}}</p>
+ <p>对应安装包：{{release.asset||'未找到当前系统安装包'}} · {{targetSize?fmtMiB(targetSize)+' MiB':'大小未知'}}</p>
+ <p>{{release.update_available?'检测到较新版本，可直接升级。':'当前没有较新版本；也可以从下方选择已有旧版回退。'}}</p>
+</div>
+<section class="update-history">
+ <div class="update-history-head"><div><h3>历史正式版本（最近 10 个）</h3><p class="tip">选择旧版本后可重新下载安装；版本列表从 GitHub Release 获取，下载仍使用上方选择的线路。</p></div><button type="button" class="btn small" :disabled="busy" @click="loadVersionHistory">刷新版本列表</button></div>
+ <label for="update-version-choice">准备安装的版本<select id="update-version-choice" v-model="selectedVersion" :disabled="busy" @change="updateReady=null;downloadProgress=null">
+  <option value="">自动使用最新版本 {{release?.version||'（先检查更新）'}}</option>
+  <option v-for="v in versions" :key="v.version" :value="v.version">{{v.version}} · {{fmtMiB(v.size)}} MiB {{v.current?'· 当前版本':v.is_older?'· 旧版／回退':'· 可升级'}}</option>
+ </select></label>
+ <p v-if="versionsError" class="tip warning">历史版本列表读取失败：{{versionsError}}。需要连接 GitHub API，公益下载代理可能不能列出历史版本。</p>
+ <p class="tip" v-if="selectedRelease?.is_older">这是降级操作。请先备份用户数据、队列存档，较旧程序可能无法识别新版存档字段。原 EXE 备份不等于用户数据备份。</p>
+ <p class="tip" v-if="selectedRelease?.current">选中的版本与当前运行版本相同，无须重新安装。</p>
+ <button class="btn primary" type="button" :disabled="busy||!canDownloadTarget" @click="downloadUpdate">{{downloading?'下载中…':selectedRelease?.is_older?'下载旧版并验证 SHA-256':'下载并验证 SHA-256'}}</button>
+</section>
+<section v-if="downloadProgress" class="update-transfer" aria-label="更新下载进度" aria-live="polite">
+ <div class="update-transfer-title"><strong>{{progressPhase(downloadProgress)}}</strong><strong>{{Number(downloadProgress.percent||0).toFixed(1)}}%</strong></div>
+ <progress max="100" :value="Math.min(100,Math.max(0,Number(downloadProgress.percent)||0))"></progress>
+ <div class="update-transfer-stats">
+  <span>已下载：{{fmtMiB(downloadProgress.downloaded_bytes)}} MiB / {{fmtMiB(downloadProgress.total_bytes||targetSize)}} MiB</span>
+  <span>当前平均速度：{{fmtMiB(downloadProgress.speed_bps)}} MiB/s</span>
+ </div>
+ <p class="tip">{{downloadProgress.message||'正在处理'}} <span v-if="downloadProgress.source">· 当前线路 {{downloadProgress.source}}</span></p>
+</section>
+<div v-if="updateReady" class="update-ready">
+ <p><strong>准备安装：{{updateReady.version}}</strong> · SHA-256：{{updateReady.sha256.slice(0,12)}}…</p>
+ <button class="btn primary" :disabled="busy" @click="installUpdate">{{selectedRelease?.is_older?'回退安装并重启':'安装更新并重启'}}</button>
+</div>
+<p class="tip">自动更新需要可写的程序安装目录。下载使用官方 Release 或所选第三方代理；SHA-256 只校验文件完整性，代理线路提供文件中转，但并非 GitHub 官方或软件签名机构；SHA-256 可验证传输一致性，却无法证明代理未同时篡改清单与 ZIP。优先使用官方源或自行核对 GitHub 官方校验和。Docker 请通过重新构建/拉取镜像升级。</p>
 </article></template>
 </main><footer>BiliPDJ Go · 本地优先 · 仅供直播管理使用</footer></div>
 <div v-if="storageInfo.conflict&&!storageDecisionDismissed" class="wizard-backdrop" role="presentation"><section class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="storage-conflict-title"><div class="wizard-top"><div><p class="eyebrow">STORAGE CONFLICT</p><h2 id="storage-conflict-title">检测到两份用户数据</h2></div></div><div class="wizard-body"><p>发现新的 bilipdj-go 目录与旧版 Go 数据不一致。当前只读取独立 Go 目录，不会自动覆盖新存档，也不会写入 Python 的 bilipdj 目录。</p><div class="storage-paths"><div><strong>旧版</strong><code>{{storageInfo.legacy}}</code></div><div><strong>系统用户目录</strong><code>{{storageInfo.user}}</code></div></div><p class="tip">建议先备份两份 Go 数据。确认仅关闭警告，继续使用当前 bilipdj-go 数据，不自动合并任何文件。</p></div><div class="wizard-footer"><button class="btn" @click="storageDecisionDismissed=true">暂不确认（保持现有 Go 数据）</button><span class="wizard-spacer"></span><button class="btn primary" :disabled="storageBusy" @click="chooseStorage('user')">确认使用 Go 独立目录</button></div></section></div>
