@@ -3,6 +3,9 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/binary"
+	_ "embed"
 	"log"
 	"os"
 	"path/filepath"
@@ -34,6 +37,9 @@ var (
 	procTrackPopup       = user32.NewProc("TrackPopupMenu")
 	procDestroyMenu      = user32.NewProc("DestroyMenu")
 	procLoadIcon         = user32.NewProc("LoadIconW")
+	procCreateIcon       = user32.NewProc("CreateIconFromResourceEx")
+	procDestroyIcon      = user32.NewProc("DestroyIcon")
+	procGetSystemMetrics = user32.NewProc("GetSystemMetrics")
 	procMessageBox       = user32.NewProc("MessageBoxW")
 	procShellNotify      = shell32.NewProc("Shell_NotifyIconW")
 	procShellExecute     = shell32.NewProc("ShellExecuteW")
@@ -96,9 +102,69 @@ type notifyIcon struct {
 }
 
 type trayControl struct {
-	url  string
-	quit func()
-	icon notifyIcon
+	url       string
+	quit      func()
+	icon      notifyIcon
+	ownsIcon  bool // CreateIconFromResourceEx requires DestroyIcon
+}
+
+// The committed Base64 asset decodes to a standard multi-resolution .ico file.
+// Embedding the source data keeps "go build" independent of external asset
+// paths; the release workflow also decodes the app icon for EXE resources.
+//go:embed assets/bilipdj-go-tray.ico.b64
+var trayIconBase64 string
+
+// trayIconFromEmbeddedICO extracts the best-sized RT_ICON bitmap from .ico,
+// then creates an HICON without writing a temporary file to disk.
+func trayIconFromEmbeddedICO() uintptr {
+	data, err := base64.StdEncoding.DecodeString(trayIconBase64)
+	if err != nil || len(data) < 22 || binary.LittleEndian.Uint16(data[0:2]) != 0 || binary.LittleEndian.Uint16(data[2:4]) != 1 {
+		log.Printf("tray icon asset is invalid: %v", err)
+		return 0
+	}
+	count := int(binary.LittleEndian.Uint16(data[4:6]))
+	size, _, _ := procGetSystemMetrics.Call(49) // SM_CXSMICON; DPI-aware on Windows
+	target := int(size)
+	if target < 16 {
+		target = 16
+	}
+	bestOffset, bestLength, bestSize, bestDelta := 0, 0, 0, int(^uint(0)>>1)
+	for i := 0; i < count; i++ {
+		entry := 6 + 16*i
+		if entry+16 > len(data) {
+			break
+		}
+		width, height := int(data[entry]), int(data[entry+1])
+		if width == 0 {
+			width = 256
+		}
+		if height == 0 {
+			height = 256
+		}
+		if width != height {
+			continue
+		}
+		length := int(binary.LittleEndian.Uint32(data[entry+8 : entry+12]))
+		offset := int(binary.LittleEndian.Uint32(data[entry+12 : entry+16]))
+		if length < 40 || offset < 0 || offset > len(data) || length > len(data)-offset {
+			continue
+		}
+		delta := width - target
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta < bestDelta || (delta == bestDelta && width > bestSize) {
+			bestOffset, bestLength, bestSize, bestDelta = offset, length, width, delta
+		}
+	}
+	if bestLength == 0 {
+		return 0
+	}
+	hicon, _, _ := procCreateIcon.Call(
+		uintptr(unsafe.Pointer(&data[bestOffset])), uintptr(bestLength),
+		1, 0x00030000, uintptr(bestSize), uintptr(bestSize), 0)
+	runtime.KeepAlive(data)
+	return hicon
 }
 
 var trayState *trayControl // Single-instance tray callback; owned by process lifetime.
@@ -199,12 +265,21 @@ func runTray(url string, quit func(), ready chan<- uintptr) {
 	state.icon.Size = uint32(unsafe.Sizeof(state.icon))
 	state.icon.Flags = nifMessage | nifIcon | nifTip
 	state.icon.CallbackMessage = wmTrayIcon
-	icon, _, _ := procLoadIcon.Call(0, 32512) // IDI_APPLICATION
+	icon := trayIconFromEmbeddedICO()
+	if icon != 0 {
+		state.ownsIcon = true
+	} else {
+		// Keep startup usable if the icon resource is corrupt.
+		icon, _, _ = procLoadIcon.Call(0, 32512) // IDI_APPLICATION fallback
+	}
 	state.icon.Icon = icon
 	copy(state.icon.Tip[:], syscall.StringToUTF16("BiliPDJ Go · 双击打开管理界面"))
 	trayState = state
 	ok, _, _ := procShellNotify.Call(nimAdd, uintptr(unsafe.Pointer(&state.icon)))
 	if ok == 0 {
+		if state.ownsIcon {
+			procDestroyIcon.Call(state.icon.Icon)
+		}
 		trayState = nil
 		procDestroyWindow.Call(hwnd)
 		ready <- 0
@@ -219,6 +294,9 @@ func runTray(url string, quit func(), ready chan<- uintptr) {
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+	if state.ownsIcon {
+		procDestroyIcon.Call(state.icon.Icon)
 	}
 	trayState = nil
 }

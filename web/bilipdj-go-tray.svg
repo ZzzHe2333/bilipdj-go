@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BiliPDJ-Go 高对比托盘排队图标">
+<rect x="10" y="10" width="492" height="492" rx="115" fill="#111D3C"/>
+<path d="M174 165 L143 114 M340 165 L369 114" stroke="#FCFFFF" stroke-width="37" stroke-linecap="round"/>
+<rect x="88" y="157" width="338" height="270" rx="70" fill="#F9FCFF"/>
+<circle cx="167" cy="224" r="24" fill="#03C8E8"/><circle cx="167" cy="295" r="24" fill="#F6529C"/><circle cx="167" cy="366" r="24" fill="#6478E9"/>
+<rect x="215" y="206" width="158" height="35" rx="17.5" fill="#182A4F"/><rect x="215" y="277" width="138" height="35" rx="17.5" fill="#182A4F"/><rect x="215" y="348" width="111" height="35" rx="17.5" fill="#182A4F"/>
+</svg>

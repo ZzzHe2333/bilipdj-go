@@ -1,6 +1,6 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0c1422"><title>BiliPDJ Go · 直播弹幕控制台</title><link rel="stylesheet" href="/style.css"></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0c1422"><title>BiliPDJ Go · 直播弹幕控制台</title><link rel="icon" type="image/svg+xml" href="/bilipdj-go-tray.svg"><link rel="stylesheet" href="/style.css"></head><body>
 <div id="app" v-cloak>
-<aside class="sidebar"><div class="brand"><div class="logo">B</div><div><strong>BiliPDJ <em>GO</em></strong><small>LIVE OPERATIONS</small></div></div>
+<aside class="sidebar"><div class="brand"><img class="logo logo-image" src="/bilipdj-go.svg" width="35" height="35" alt="BiliPDJ-Go 排队管理图标"><div><strong>BiliPDJ <em>GO</em></strong><small>LIVE OPERATIONS</small></div></div>
 <div class="side-label">运行中心</div>
 <button :class="['nav',{selected:page==='logs'}]" @click="page='logs'"><span>▤</span> 运行日志</button>
 <button :class="['nav',{selected:page==='queue'}]" @click="page='queue'"><span>☷</span> 排队管理 <small class="nav-count">{{queue.length}}</small></button>

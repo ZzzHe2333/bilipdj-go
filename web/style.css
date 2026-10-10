@@ -141,3 +141,6 @@
 .update-transfer .tip{margin:11px 0 0;overflow-wrap:anywhere}
 .update-ready{border-top:1px solid var(--line);padding-top:15px;margin-top:14px}
 @media(max-width:700px){.update-history-head .btn{width:100%}.update-transfer-stats{display:grid}.update-history label{max-width:100%}}
+
+/* Brand icon: native SVG keeps edges crisp and avoids the placeholder letter B. */
+.logo.logo-image{display:block;flex:none;object-fit:contain;width:35px;height:35px;border-radius:10px;background:transparent;box-shadow:0 6px 20px #050b1859}

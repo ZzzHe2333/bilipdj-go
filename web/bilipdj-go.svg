@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BiliPDJ-Go 直播排队管理图标">
+<defs><linearGradient id="bg" x1=".03" y1=".02" x2=".98" y2="1"><stop offset="0" stop-color="#00CAF0"/><stop offset=".46" stop-color="#506BEB"/><stop offset="1" stop-color="#F73789"/></linearGradient><linearGradient id="card" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#26385F"/><stop offset="1" stop-color="#10182D"/></linearGradient><linearGradient id="shine" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F4F8FF"/></linearGradient><filter id="softShadow" x="-.3" y="-.3" width="1.6" height="1.6"><feDropShadow dx="0" dy="13" stdDeviation="14" flood-color="#08143B" flood-opacity=".32"/></filter></defs>
+<rect x="12" y="12" width="488" height="488" rx="116" fill="url(#bg)"/>
+<path d="M52 206 C70 76 179 28 274 27" fill="none" stroke="#FFFFFF" stroke-opacity=".18" stroke-width="28" stroke-linecap="round"/>
+<circle cx="408" cy="112" r="56" fill="#FFFFFF" opacity=".075"/><circle cx="84" cy="424" r="89" fill="#052D99" opacity=".14"/>
+<path d="M172 167 L143 119 M304 166 L336 116" stroke="#14234B" stroke-width="32" stroke-linecap="round"/><path d="M172 167 L143 119 M304 166 L336 116" stroke="#F8FCFF" stroke-width="17" stroke-linecap="round"/>
+<rect x="81" y="147" width="318" height="253" rx="79" fill="#122249" filter="url(#softShadow)"/><rect x="93" y="158" width="294" height="227" rx="70" fill="url(#shine)"/>
+<path d="M124 201 C139 173 172 170 193 170" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" opacity=".75"/>
+<path d="M164 269 Q185 234 208 269 M267 269 Q289 234 311 269" fill="none" stroke="#14234B" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+<ellipse cx="147" cy="297" rx="20" ry="9" fill="#FF65AA" opacity=".78"/><ellipse cx="332" cy="297" rx="20" ry="9" fill="#FF65AA" opacity=".78"/>
+<rect x="177" y="317" width="277" height="148" rx="30" fill="#08142D" opacity=".27" transform="translate(0 10)"/><rect x="175" y="310" width="280" height="151" rx="30" fill="url(#card)" stroke="#6689C5" stroke-opacity=".85" stroke-width="5"/>
+<path d="M205 325 H419" stroke="#FFFFFF" opacity=".12" stroke-width="5" stroke-linecap="round"/>
+<circle cx="216" cy="354" r="13" fill="#27DDEA"/><path d="M209 358 Q216 345 223 358" stroke="#153A66" stroke-width="3.5" fill="none" stroke-linecap="round"/><rect x="244" y="347" width="149" height="14" rx="7" fill="#7CEBFF"/>
+<circle cx="216" cy="389" r="13" fill="#FA68B6"/><path d="M209 393 Q216 380 223 393" stroke="#66244D" stroke-width="3.5" fill="none" stroke-linecap="round"/><rect x="244" y="382" width="126" height="14" rx="7" fill="#D9B5FF"/>
+<circle cx="216" cy="424" r="13" fill="#B6C3FF"/><path d="M209 428 Q216 415 223 428" stroke="#28345F" stroke-width="3.5" fill="none" stroke-linecap="round"/><rect x="244" y="417" width="104" height="14" rx="7" fill="#9AACDE"/>
+<path d="M423 205 L450 231 L423 257" stroke="#FFFFFF" stroke-width="15" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
