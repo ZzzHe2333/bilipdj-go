@@ -65,7 +65,7 @@ func (a *App) isOperator(e live.Event) bool {
  if a.isSuperOperator(e){return true}
  p,ok:=a.config.effectiveEntry(e)
  if ok{return (p.Role=="admin"||p.Role=="part_time")&&len(p.Capabilities)>0}
- if a.config.Permissions!=nil{return false}
+ if a.config.Permissions!=nil{return e.Platform=="bilibili"&&e.IsRoomAdmin&&a.config.Switches!=nil&&a.config.Switches.RoomAdminOperator}
  return named(a.config.Admins,e.Username)||(e.Platform=="bilibili"&&e.IsRoomAdmin&&a.config.Switches!=nil&&a.config.Switches.RoomAdminOperator)
 }
 func (a *App) isGuard(e live.Event) bool {
