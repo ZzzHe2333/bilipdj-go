@@ -28,10 +28,10 @@ var batteryCatalog = map[string]int{
 	"海湾之旅": 7999, "鸿运小电视": 10000,
 }
 
-func (a *App) processGiftLocked(e live.Event) {
+func (a *App) processGiftLocked(e live.Event) (bool,bool) {
 	g := e.Gift
 	if g == nil || e.Platform != "bilibili" || e.UserID == "" {
-		return
+		return false,false
 	}
 	if _, err := strconv.ParseUint(e.UserID, 10, 64); err != nil || e.UserID == "0" {
 		return
@@ -40,7 +40,7 @@ func (a *App) processGiftLocked(e live.Event) {
 		key := e.Platform + ":" + g.EventID
 		for _, id := range a.giftSeen {
 			if id == key {
-				return
+				return false,false
 			}
 		}
 		a.giftSeen = append(a.giftSeen, key)
@@ -52,7 +52,7 @@ func (a *App) processGiftLocked(e live.Event) {
 	a.giftLast = &copyEvent
 	granted := false
 	conf := a.config.GiftQueue
-	if conf != nil && conf.Enabled && !g.GuardBuy && strings.EqualFold(strings.TrimSpace(g.CoinType), "gold") && !named(a.config.Blacklist, e.Username) {
+	if conf != nil && conf.Enabled && !g.GuardBuy && strings.EqualFold(strings.TrimSpace(g.CoinType), "gold") && !a.isBlacklisted(e) {
 		matchName := named(conf.Names, g.Name)
 		batteries, found := batteryCatalog[g.Name]
 		matchBatteries := found && conf.MinBatteries > 0 && int64(batteries)*int64(g.Count) >= int64(conf.MinBatteries)
@@ -68,10 +68,7 @@ func (a *App) processGiftLocked(e live.Event) {
 			}
 		}
 	}
-	a.publishLocked(Event{Type: "gift", Data: map[string]any{"event": e, "credit_granted": granted}})
-	if err := a.saveLocked(); err != nil { // The in-memory state remains valid, but don't leak sensitive details.
-		a.publishLocked(Event{Type: "warning", Data: "礼物资格状态持久化失败"})
-	}
+	return true,granted
 }
 func (a *App) useGiftCreditLocked(e live.Event, index int) bool {
 	conf := a.config.GiftQueue
