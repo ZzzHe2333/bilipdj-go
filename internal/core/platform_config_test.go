@@ -43,6 +43,7 @@ func TestPlatformGetConfigMasksCredentials(t *testing.T) {
     a.config.Bilibili.Cookie = "SESSDATA=secret"
     a.config.Huya.Cookie = "secret"
     req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9816/api/config", nil)
+    req.RemoteAddr="127.0.0.1:58123"
     w := httptest.NewRecorder()
     a.Routes(http.NotFoundHandler()).ServeHTTP(w, req)
     if w.Code != 200 || bytes.Contains(w.Body.Bytes(), []byte("secret")) {

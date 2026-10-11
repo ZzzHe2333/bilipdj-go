@@ -133,6 +133,22 @@ func (s *Server) callBackend(method,path string, body any) (any,error) {
  if err:=json.Unmarshal(rec.Body.Bytes(),&v);err!=nil {return nil,err}
  return v,nil
 }
+// MCP write tools operate on the current archive, but the HTTP backend
+// requires an explicit target slot for every mutation. Read it immediately
+// before submitting: if another UI switches slots in between, HTTP returns
+// 409 rather than modifying a different archive without noticing.
+func (s *Server) callQueue(body map[string]any)(any,error){
+ v,err:=s.callBackend("GET","/api/queue/slots",nil)
+ if err!=nil{return nil,err}
+ state,ok:=v.(map[string]any)
+ if !ok{return nil,errors.New("invalid archive state response")}
+ slot,ok:=state["active_slot"].(float64)
+ if !ok||slot<1||slot>10||slot!=float64(int(slot)){
+  return nil,errors.New("unable to identify active archive slot")
+ }
+ body["slot"]=int(slot)
+ return s.callBackend("POST","/api/queue",body)
+}
 func (s *Server) call(name string, args json.RawMessage, canWrite bool)(any,error){
  switch name{
  case "bilipdj_status":
@@ -150,18 +166,18 @@ func (s *Server) call(name string, args json.RawMessage, canWrite bool)(any,erro
   var a struct{Name string `json:"name"`; Note string `json:"note"`}
   if e:=parseParams(args,&a);e!=nil{return nil,e}
   if strings.TrimSpace(a.Name)=="" {return nil,errors.New("name required")}
-  return s.callBackend("POST","/api/queue",map[string]any{"action":"add","name":a.Name,"note":a.Note})
+  return s.callQueue(map[string]any{"action":"add","name":a.Name,"note":a.Note})
  case "bilipdj_edit","bilipdj_remove":
   var a struct{Key string `json:"key"`; Note string `json:"note"`}
   if e:=parseParams(args,&a);e!=nil{return nil,e}
   if strings.TrimSpace(a.Key)=="" {return nil,errors.New("key required")}
   action:="edit";if name=="bilipdj_remove" {action="remove"}
-  return s.callBackend("POST","/api/queue",map[string]any{"action":action,"key":a.Key,"note":a.Note})
+  return s.callQueue(map[string]any{"action":action,"key":a.Key,"note":a.Note})
  case "bilipdj_move":
   var a struct{Key string `json:"key"`; Index *int `json:"index"`}
   if e:=parseParams(args,&a);e!=nil{return nil,e}
   if strings.TrimSpace(a.Key)==""||a.Index==nil{return nil,errors.New("key and index required")}
-  return s.callBackend("POST","/api/queue",map[string]any{"action":"move","key":a.Key,"index":*a.Index})
+  return s.callQueue(map[string]any{"action":"move","key":a.Key,"index":*a.Index})
  case "bilipdj_switch_slot":
   var a struct{Slot int `json:"slot"`}
   if e:=parseParams(args,&a);e!=nil{return nil,e}
@@ -171,7 +187,7 @@ func (s *Server) call(name string, args json.RawMessage, canWrite bool)(any,erro
   var a struct{Confirm bool `json:"confirm"`}
   if e:=parseParams(args,&a);e!=nil{return nil,e}
   if !a.Confirm{return nil,errors.New("confirm=true required to clear queue")}
-  return s.callBackend("POST","/api/queue",map[string]any{"action":"clear"})
+  return s.callQueue(map[string]any{"action":"clear"})
  }
  return nil,fmt.Errorf("unknown tool %q",name)
 }

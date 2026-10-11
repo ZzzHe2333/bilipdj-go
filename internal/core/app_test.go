@@ -34,7 +34,7 @@ func TestHTTPAndSecurity(t *testing.T) {
 	a := New(t.TempDir(), "0.1.0", "org/demo")
 	handler := a.Routes(http.NotFoundHandler())
 	post := func(origin, remote string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9816/api/queue", bytes.NewBufferString(`{"action":"add","name":"Alice"}`))
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9816/api/queue", bytes.NewBufferString(`{"action":"add","name":"Alice","slot":1}`))
 		req.RemoteAddr = remote
 		if origin != "" {
 			req.Header.Set("Origin", origin)

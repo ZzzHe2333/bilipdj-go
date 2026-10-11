@@ -210,7 +210,7 @@ go vet ./...
 ## 🔒 安全提示
 
 - Cookie、扫码回调、`SESSDATA`、管理员 Token 与 MCP Token **不要提交 GitHub，也不要粘贴到公开 Issue 或日志**。
-- 默认监听本机。主动开放局域网端口时，队列读取接口可能向可达设备暴露排队信息；管理写操作需要强随机 `BILIPDJ_ADMIN_TOKEN`，同时应配置防火墙及可信网络。
+- 默认监听本机。主动开放局域网端口时，队列读取接口可能向可达设备暴露排队信息；**完整配置的读取和写入均要求本机受信访问或管理员 Token**。远程管理请配置强随机 `BILIPDJ_ADMIN_TOKEN`，并使用防火墙及可信网络。
 - MCP **默认只读**，写操作使用独立的 `BILIPDJ_MCP_WRITE_TOKEN`；不要把 MCP 接口直接暴露公网。
 - 自更新会短暂停止弹幕监听；**降级前先单独备份用户数据**。二进制回滚并不代表旧版能够读取新版存档。
 - Bilibili / 抖音的直播协议可能变化；离线报文测试不等于真实直播间长期稳定性验证。
@@ -222,6 +222,7 @@ go vet ./...
 | [功能差异审核](./docs/FEATURE_PARITY.md) | 原 Python 版与 Go 版的支持差异和未验证部分 |
 | [多直播间和多 B站 Cookie](./docs/MULTI_ROOM.md) | 浏览器式直播间配置标签、独立 Cookie、扫码和共享存档 |
 | [排队与权限 UI / 指令对照](./docs/CONSOLE_UI_AND_COMMAND_PARITY.md) | 双击编辑、确认排序、悬浮预览、10 个样式档、角色能力及与 Python 指令差异 |
+| [队列事务安全与槽位保护](./docs/QUEUE_TRANSACTION_FIXES.md) | 所有队列写操作的槽位参数、保存失败回滚、并发监听配置及管理员读取权限 |
 | [用户数据与迁移](./docs/USER_DATA_COMPAT.md) | Windows / Linux / macOS 数据目录、Python/Go 隔离 |
 | [更新器说明](./docs/UPDATER.md) | 公益加速节点、进度、历史版本、回滚 |
 | [性能监测](./docs/PERFORMANCE.md) | 固定七项监测、项目文件及 Go 存档空间统计口径、采样设置 |
