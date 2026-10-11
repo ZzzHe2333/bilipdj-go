@@ -77,49 +77,43 @@ func (a *App) legacyRoutes(mux *http.ServeMux) {
 			send(w, 500, map[string]string{"error": "保存原始配置失败: " + e.Error()})
 			return
 		}
-		before := persisted{Config: a.config, Queue: a.queue, Slots: a.slots, DailyPeriod: a.dailyPeriod, DailyCounts: a.dailyCounts, GiftCredits: a.giftCredits, GiftUsed: a.giftUsed, GiftSeen: a.giftSeen, Style: a.style, Appearance: a.appearance}
-		nextSlots := map[string][]QueueItem{}
-		for key, items := range a.slots {
-			nextSlots[key] = append([]QueueItem{}, items...)
-		}
-		a.slots = nextSlots
-		a.config = m.cfg
-		a.stripBlacklistedRolesLocked()
-		if m.dailyPeriod != "" {
-			a.dailyPeriod = m.dailyPeriod
-			a.dailyCounts = m.dailyCounts
-		}
-		if len(m.slots) > 0 {
-			for key, items := range m.slots {
-				a.slots[key] = items
-			}
-		}
-		if m.queue != nil {
-			a.queue = m.queue
-		}
-		if m.style != nil {
-			a.style = m.style
-		}
-		if m.appearance != nil {
-			a.appearance = m.appearance
-		}
-		e = a.saveLocked()
-		if e != nil {
-			a.config = before.Config
-			a.dailyPeriod = before.DailyPeriod
-			a.dailyCounts = before.DailyCounts
-			a.slots = before.Slots
-			a.queue = before.Queue
-			a.style = before.Style
-			a.appearance = before.Appearance
-			a.mu.Unlock()
-			send(w, 500, map[string]string{"error": "保存失败: " + e.Error()})
-			return
-		}
-		cfg := a.config
+        before,err:=a.liveSnapshotLocked()
+        if err!=nil{
+            a.mu.Unlock()
+            send(w,500,map[string]string{"error":"无法建立导入前完整快照: "+err.Error()})
+            return
+        }
+        nextSlots:=make(map[string][]QueueItem,len(a.slots))
+        for key,items:=range a.slots{
+            nextSlots[key]=append([]QueueItem(nil),items...)
+        }
+        a.slots=nextSlots
+        a.config=m.cfg
+        a.stripBlacklistedRolesLocked()
+        if m.dailyPeriod!=""{
+            a.dailyPeriod=m.dailyPeriod
+            a.dailyCounts=m.dailyCounts
+        }
+        for key,items:=range m.slots{
+            a.slots[key]=append([]QueueItem(nil),items...)
+        }
+        if m.queue!=nil{a.queue=append([]QueueItem(nil),m.queue...)}
+        if m.style!=nil{a.style=m.style}
+        if m.appearance!=nil{a.appearance=m.appearance}
+        if e=a.saveLocked();e!=nil{
+            restoreErr:=a.restoreLiveLocked(before)
+            a.mu.Unlock()
+            if restoreErr!=nil{
+                send(w,500,map[string]string{"error":fmt.Sprintf("导入保存失败: %v；Local 队列回滚失败: %v",e,restoreErr)})
+            }else{
+                send(w,500,map[string]string{"error":"保存失败（导入已回滚）: "+e.Error()})
+            }
+            return
+        }
+        // Save and worker swap must be serialized under the SAME App lock.
+        a.applyLocked(a.config)
 		a.publishLocked(Event{Type: "queue", Data: a.queue})
 		a.mu.Unlock()
-		a.apply(cfg)
 		send(w, 200, map[string]any{"status": "ok", "preview": m.preview, "backup_directory": "migration-backup"})
 	})
 	mux.HandleFunc("GET /api/style", func(w http.ResponseWriter, r *http.Request) {
