@@ -34,7 +34,7 @@ func (a *App) processGiftLocked(e live.Event) (bool,bool) {
 		return false,false
 	}
 	if _, err := strconv.ParseUint(e.UserID, 10, 64); err != nil || e.UserID == "0" {
-		return
+		return false,false
 	}
 	if g.EventID != "" {
 		key := e.Platform + ":" + g.EventID
