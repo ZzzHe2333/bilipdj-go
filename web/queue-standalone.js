@@ -89,7 +89,7 @@ createApp({setup(){
   if(busy.value)return false;
   busy.value=true;++readSeq;
   try{
-   const data=await api(path,{method:'POST',body:JSON.stringify(payload)});
+   const data=await api(path,{method:'POST',body:JSON.stringify(path==='/api/queue'?{...payload,slot:Number(activeSlot.value)}:payload)});
    if(path==='/api/queue/slots'){
     queue.value=Array.isArray(data.entries)?data.entries:[];
     slotInfo.value=data;activeSlot.value=data.active_slot||1;
@@ -136,7 +136,7 @@ createApp({setup(){
   if(editingSlot.value!==activeSlot.value){closeEditing();notify('存档已切换，请重新选择成员','error');return;}
   const current=queue.value.find(q=>q.key===editingKey.value);
   if(!current){closeEditing();notify('成员已不存在，请刷新后重试','error');return;}
-  const payload={action:'edit',key:editingKey.value,note:editNote.value};
+  const payload={action:'edit',key:editingKey.value,note:editNote.value,slot:editingSlot.value};
   if(isManual(current)){
    payload.new_name=editName.value.trim();payload.source_platform=editSource.value;
   }
