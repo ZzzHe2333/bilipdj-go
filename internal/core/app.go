@@ -392,12 +392,19 @@ func (a *App) Start() {
 }
 func (a *App) apply(cfg Config) {
  a.mu.Lock()
+ defer a.mu.Unlock()
+ a.applyLocked(cfg)
+}
+
+// applyLocked must be called under a.mu. Committing a saved config and
+// installing the workers happens under one lock, so concurrent saves cannot
+// resurrect an older listener configuration.
+func (a *App) applyLocked(cfg Config) {
  for _,cancel:=range a.workers{cancel()}
  a.workers=map[string]context.CancelFunc{}
  a.statuses=map[string]live.Status{}
  a.listenerGeneration++
  for _,pc:=range configuredListeners(cfg){a.startListenerLocked(pc,a.listenerGeneration)}
- a.mu.Unlock()
 }
 
 // All calls hold a.mu. This helper can replace a single room without
@@ -740,8 +747,10 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
+        snapshot:=a.queueSnapshotLocked()
 		a.switchSlotLocked(payload.Slot)
 		if e := a.saveLocked(); e != nil {
+            a.restoreQueueLocked(snapshot)
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
 		}
@@ -766,6 +775,8 @@ func (a *App) Routes(ui http.Handler) http.Handler {
   send(w,200,map[string]any{"active":active,"instances":instances})
  })
  mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+        if !a.isAdmin(r) {send(w,403,map[string]string{"error":"forbidden"});return}
+        w.Header().Set("Cache-Control","no-store")
 		a.mu.RLock()
 		defer a.mu.RUnlock()
 		c := redactExtraCookies(a.config)
@@ -835,16 +846,19 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         cfg.Guards=a.config.Guards
         cfg.Blacklist=a.config.Blacklist
         cfg.ArchiveSlot=a.config.ArchiveSlot
+        before:=a.config
 		a.config = cfg
 		// A blacklisted name cannot retain operator/guard roles.
 		a.stripBlacklistedRolesLocked()
 		e = a.saveLocked()
-		a.mu.Unlock()
-		if e != nil {
+        if e!=nil {
+            a.config=before
+            a.mu.Unlock()
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
-		}
-		a.apply(cfg)
+        }
+        a.applyLocked(a.config)
+        a.mu.Unlock()
 		a.logEvent("INFO", "system", "配置已保存，平台监听已更新")
 		send(w, 200, map[string]string{"status": "ok"})
 	})
@@ -876,6 +890,15 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
+        if req.Slot<1||req.Slot>10 {
+            send(w,400,map[string]string{"error":"操作必须提供有效的队列存档号 1–10"})
+            return
+        }
+        if req.Slot!=a.config.ArchiveSlot {
+            send(w,409,map[string]string{"error":"队列存档已被其他页面切换，请刷新后重试"})
+            return
+        }
+        snapshot:=a.queueSnapshotLocked()
 		switch req.Action {
         case "reorder":
             if req.Slot!=a.config.ArchiveSlot{send(w,409,map[string]string{"error":"当前存档已被切换，取消排序并刷新"});return}
@@ -902,7 +925,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		case "clear":
 			a.queue = []QueueItem{}
 		case "remove":
-			items := a.queue[:0]
+			items := make([]QueueItem,0,len(a.queue))
 			for _, q := range a.queue {
 				if q.Key != req.Key {
 					items = append(items, q)
@@ -992,6 +1015,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		if e := a.saveLocked(); e != nil {
+            a.restoreQueueLocked(snapshot)
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
 		}
