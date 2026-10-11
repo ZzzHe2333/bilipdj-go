@@ -118,7 +118,7 @@ createApp({setup(){
   if(busy.value||!sorting.value)return;
   busy.value=true;
   try{
-   queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value,slot:Number(selectedSlot.value)})});
+   queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({action:'reorder',keys:sortKeys.value,before:sortBefore.value,slot:Number(selectedSlot.value)})});queueReadSeq++;void refresh();
    cancelSorting();message('已保存新的排队顺序','success');
   }catch(e){message('排序未保存：'+e.message,'error');await refresh()}
   finally{busy.value=false}
@@ -138,7 +138,7 @@ createApp({setup(){
   const payload={action:'edit',key:q.key,note:queueEditNote.value,slot:queueEditSlot.value};
   if(queueEditManual.value){payload.new_name=queueEditName.value.trim();payload.source_platform=queueEditSource.value}
   busy.value=true;
-  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(payload)});queueEditing.value=false;message('排队信息已保存','success')}
+  try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(payload)});queueReadSeq++;void refresh();queueEditing.value=false;message('排队信息已保存','success')}
   catch(e){message(e.message,'error')}
   finally{busy.value=false}
  }
@@ -292,7 +292,7 @@ createApp({setup(){
  const connectedCount=computed(()=>[...monitorPlatforms.value,...extraMonitorPlatforms.value].filter(p=>statuses.value[p.instanceId||p.id]?.connected).length);
  const filteredMessages=computed(()=>[...messages.value].reverse().filter(m=>filter.value==='all'||filter.value===m.platform));
  const dateTime=t=>{try{return new Date(t).toLocaleTimeString('zh-CN',{hour12:false})}catch{return ''}};
- let eventStream=null, poller=null, clock=null;
+ let eventStream=null, poller=null, clock=null,queueReadSeq=0;
  function message(t,level='info'){notice.value=t;noticeLevel.value=level}
  async function api(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};
  const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;
@@ -332,7 +332,21 @@ createApp({setup(){
  function exportLogs(){const content=filteredLogs.value.map(formatLog).join('\n')+'\n';const blob=new Blob([content],{type:'text/plain;charset=utf-8'});const link=URL.createObjectURL(blob);const a=document.createElement('a');a.href=link;a.download='bilipdj-log-'+new Date().toISOString().slice(0,10)+'.txt';a.click();URL.revokeObjectURL(link)}
  function clearLogView(){logs.value=[];message('已清空浏览器当前显示的日志；不会删除服务端日志','info')}
  watch([filteredLogs,autoScroll],()=>{if(autoScroll.value)nextTick(()=>{const el=logListRef.value;if(el)el.scrollTop=el.scrollHeight})},{flush:'post'});
- async function refresh(){try{const [s,q,m,slots]=await Promise.all([api('/api/status'),api('/api/queue'),api('/api/messages'),api('/api/queue/slots')]);status.value=s;queue.value=q;messages.value=m;slotInfo.value=slots;selectedSlot.value=slots.active_slot}catch(e){message(e.message,'error')}}
+ async function refresh(){
+  const seq=++queueReadSeq;
+  try{
+    const [s,state,m,slots]=await Promise.all([api('/api/status'),api('/api/queue/state'),api('/api/messages'),api('/api/queue/slots')]);
+    if(seq!==queueReadSeq)return;
+    if(Number(state.active_slot)!==Number(slots.active_slot)){
+      setTimeout(()=>{if(seq===queueReadSeq)void refresh()},120);
+      return;
+    }
+    status.value=s;queue.value=Array.isArray(state.entries)?state.entries:[];
+    messages.value=m;slotInfo.value=slots;selectedSlot.value=Number(state.active_slot);
+    if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value='';
+    if(queueEditing.value&&queueEditSlot.value!==selectedSlot.value)queueEditing.value=false;
+  }catch(e){if(seq===queueReadSeq)message(e.message,'error')}
+}
  async function loadAppearance(){try{const appearance=await api('/api/appearance');const mode=appearance.mode==='light'?'light':'dark';const colors=appearance[mode]||{};const root=document.documentElement;const mapping={'--bg':'background','--panel':'surface','--panel2':'surface_alt','--line':'border','--text':'text','--dim':'muted','--accent':'accent'};for(const [css,k] of Object.entries(mapping)){const value=colors[k];if(typeof value==='string' && /^#[0-9a-fA-F]{3,8}$/.test(value))root.style.setProperty(css,value)}root.style.colorScheme=mode}catch{}}
  async function loadConfig(){try{const d=await api('/api/config');config.value=d.config;if(!Array.isArray(config.value.listeners))config.value.listeners=[];listenerCookies.value=d.listener_cookies||{};previousBiliEnabled.value=!!config.value.bilibili?.enabled;if(!Array.isArray(config.value.visible_platforms))config.value.visible_platforms=platformCatalog.filter(p=>config.value[p.id]?.enabled).map(p=>p.id);if(![...config.value.visible_platforms,...config.value.listeners.map(v=>v.id)].includes(activeChannelTab.value))activeChannelTab.value=config.value.visible_platforms[0]||config.value.listeners[0]?.id||'bilibili';if(!config.value.gift_queue)config.value.gift_queue={enabled:false,names:[],min_batteries:0,allow_multiple:false,slots_per_gift:1,insert_rank:1,gift_only:false};giftNamesText.value=(config.value.gift_queue.names||[]).join('\n');if(!config.value.switches)config.value.switches={paidui:true,guanfu_paidui:true,bfu_paidui:true,chaoji_paidui:true,mifu_paidui:true,quxiao_paidui:true,xiugai_paidui:true,jianzhang_chadui:false,fangguan_op:false};selectedSlot.value=config.value.archive_slot||1;blacklistText.value=(config.value.blacklist||[]).join('\n');adminsText.value=(config.value.admins||[]).join('\n');superAdminsText.value=(config.value.super_admins||[]).join('\n');guardsText.value=(config.value.guards||[]).join('\n');cookieConfigured.value=d.cookie_configured}catch(e){message(e.message,'error')}}
  async function saveConfig(){busy.value=true;try{if(config.value.douyin?.room)config.value.douyin.room=normalizeDouyinRoom(config.value.douyin.room);for(const p of (config.value.listeners||[])){if(p.platform==='douyin'&&p.room)p.room=normalizeDouyinRoom(p.room)}if(config.value.bilibili?.enabled&&!cookieConfigured.value.bilibili&&!String(config.value.bilibili.cookie||'').trim()&&!previousBiliEnabled.value)throw Error('请先扫码登录 B站，再开启弹幕监听');config.value.gift_queue.names=giftNamesText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.blacklist=blacklistText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.admins=adminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.super_admins=superAdminsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);config.value.guards=guardsText.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);await api('/api/config',{method:'POST',body:JSON.stringify(config.value)});message('已保存配置，正在重新连接平台','success');await Promise.all([refresh(),loadConfig()]);return true}catch(e){message(e.message,'error');return false}finally{busy.value=false}}
@@ -356,8 +370,8 @@ createApp({setup(){
   catch{window.prompt('复制 OBS 浏览器源地址：',obsURL.value)}
  }
  async function saveObsStyle(){busy.value=true;try{await api('/api/style',{method:'POST',body:JSON.stringify(obsStyle.value)});message('OBS 样式已保存','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
- async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({...body,slot:Number(selectedSlot.value)})});if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value=''}catch(e){message(e.message,'error')}}
- async function changeSlot(){cancelSorting();queueEditing.value=false;try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
+ async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({...body,slot:Number(selectedSlot.value)})});queueReadSeq++;void refresh();if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value=''}catch(e){message(e.message,'error')}}
+ async function changeSlot(){cancelSorting();queueEditing.value=false;try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queueReadSeq++;queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
  async function insertQueue(){if(!newName.value)return;const name=newName.value;const index=selectedIndex.value<0?0:selectedIndex.value+1;await queueAction({action:'insert',name,index});newName.value=''}
  async function moveSelected(delta){if(selectedIndex.value<0)return;await moveQueue(queue.value[selectedIndex.value],selectedIndex.value+delta)}
  async function editSelected(){if(selectedIndex.value<0)return;await editQueue(queue.value[selectedIndex.value])}
@@ -483,7 +497,7 @@ createApp({setup(){
  async function chooseStorage(choice){storageBusy.value=true;try{const result=await api('/api/storage/choice',{method:'POST',body:JSON.stringify({choice})});storageInfo.value={...storageInfo.value,choice:result.choice,conflict:false,restart_required:false};storageDecisionDismissed.value=true;message('已确认继续使用 bilipdj-go 独立目录；旧 Go 和 Python 数据未被覆盖。','success')}catch(e){message('保存存储选择失败：'+e.message,'error')}finally{storageBusy.value=false}}
  async function importPythonQueues(){if(!window.confirm('将 Python archives 目录中的排队 CSV 导入 Go 的对应槽位？Go 原存档将先备份，Python CSV 保持不变。'))return;storageBusy.value=true;try{const v=await api('/api/storage/python-queues/import',{method:'POST',body:'{}'});message(v.message||'存档已导入','success');await refresh()}catch(e){message('导入失败：'+e.message,'error')}finally{storageBusy.value=false}}
  async function exportPythonQueue(){try{const headers={};const token=sessionStorage.getItem('pdj-token');if(token)headers['X-Admin-Token']=token;const resp=await fetch('/api/storage/queue-export?slot='+Number(selectedSlot.value),{headers});if(!resp.ok)throw Error('HTTP '+resp.status);const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='queue_archive_slot_'+selectedSlot.value+'.csv';a.click();URL.revokeObjectURL(url)}catch(e){message('导出失败：'+e.message,'error')}}
- function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){queue.value=event.data}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.instance_id||event.data.platform]:event.data}}}catch{}}}
+ function connectSSE(){eventStream=new EventSource('/api/events');eventStream.onopen=()=>{streamReady.value=true};eventStream.onerror=()=>{streamReady.value=false};eventStream.onmessage=e=>{try{const event=JSON.parse(e.data);if(event.type==='danmu'){messages.value.push(event.data);if(messages.value.length>150)messages.value.shift()}else if(event.type==='queue'){void refresh()}else if(event.type==='log'){appendLog(event.data)}else if(event.type==='status'){status.value.platforms={...(status.value.platforms||{}),[event.data.instance_id||event.data.platform]:event.data}}}catch{}}}
  let autostartPoll=null;
  onMounted(()=>{document.addEventListener('visibilitychange',perfVisibilityChanged);restartPerf();refresh();refreshLogs();loadConfig().then(checkOnboarding);loadAppearance();loadObsStyle();loadStorage();connectSSE();now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});clock=setInterval(()=>now.value=new Date().toLocaleTimeString('zh-CN',{hour12:false}),1000);poller=setInterval(refresh,20000);autostartPoll=setInterval(()=>{if(page.value==='system'&&!document.hidden)void loadAutostart()},5000)});
  onUnmounted(()=>{stopProgressPolling();stopPerf();document.removeEventListener('visibilitychange',perfVisibilityChanged);if(eventStream)eventStream.close();clearInterval(clock);clearInterval(poller);clearInterval(autostartPoll);stopQR()});
