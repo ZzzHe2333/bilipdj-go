@@ -151,23 +151,7 @@ func (a *App) saveMap(w http.ResponseWriter, r *http.Request, kind string) {
 		return
 	}
 	a.mu.Lock()
-	oldStyle, oldAppearance := a.style, a.appearance
-	if kind == "style" {
-		a.style = obj
-	} else {
-		a.appearance = obj
-	}
-	e = a.saveLocked()
-	if e == nil {
-		e = a.writeWebAppearanceFile(kind, raw)
-	}
-	if e == nil && kind == "style" {
-		a.publishLocked(Event{Type: "style", Data: obj})
-	}
-	if e != nil {
-		a.style = oldStyle
-		a.appearance = oldAppearance
-	}
+	e=a.persistWebSettingsLocked(kind,obj,raw)
 	a.mu.Unlock()
 	if e != nil {
 		send(w, 500, map[string]string{"error": e.Error()})
