@@ -135,7 +135,7 @@ createApp({setup(){
   if(queueEditSlot.value!==Number(selectedSlot.value)){queueEditing.value=false;message('排队存档已切换，请重新编辑','error');return}
   const q=queue.value.find(v=>v.key===queueEditKey.value);
   if(!q){queueEditing.value=false;message('成员已变动，请刷新','error');return}
-  const payload={action:'edit',key:q.key,note:queueEditNote.value};
+  const payload={action:'edit',key:q.key,note:queueEditNote.value,slot:queueEditSlot.value};
   if(queueEditManual.value){payload.new_name=queueEditName.value.trim();payload.source_platform=queueEditSource.value}
   busy.value=true;
   try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(payload)});queueEditing.value=false;message('排队信息已保存','success')}
@@ -356,7 +356,7 @@ createApp({setup(){
   catch{window.prompt('复制 OBS 浏览器源地址：',obsURL.value)}
  }
  async function saveObsStyle(){busy.value=true;try{await api('/api/style',{method:'POST',body:JSON.stringify(obsStyle.value)});message('OBS 样式已保存','success')}catch(e){message(e.message,'error')}finally{busy.value=false}}
- async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify(body)});if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value=''}catch(e){message(e.message,'error')}}
+ async function queueAction(body){try{queue.value=await api('/api/queue',{method:'POST',body:JSON.stringify({...body,slot:Number(selectedSlot.value)})});if(selectedKey.value&&!queue.value.some(q=>q.key===selectedKey.value))selectedKey.value=''}catch(e){message(e.message,'error')}}
  async function changeSlot(){cancelSorting();queueEditing.value=false;try{const result=await api('/api/queue/slots',{method:'POST',body:JSON.stringify({slot:Number(selectedSlot.value)})});queue.value=result.entries;selectedKey.value='';slotInfo.value=result;config.value.archive_slot=result.active_slot;message('已切换到存档 '+result.active_slot,'success')}catch(e){message(e.message,'error');selectedSlot.value=slotInfo.value.active_slot}}
  async function insertQueue(){if(!newName.value)return;const name=newName.value;const index=selectedIndex.value<0?0:selectedIndex.value+1;await queueAction({action:'insert',name,index});newName.value=''}
  async function moveSelected(delta){if(selectedIndex.value<0)return;await moveQueue(queue.value[selectedIndex.value],selectedIndex.value+delta)}
