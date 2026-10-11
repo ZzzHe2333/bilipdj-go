@@ -60,13 +60,13 @@ func TestConsoleLogHTTPAndQueueInsert(t *testing.T) {
 			t.Fatalf("queue mutation status=%d, body=%s", w.Code, w.Body.String())
 		}
 	}
-	post(`{"action":"add","name":"首位"}`)
-	post(`{"action":"add","name":"末位"}`)
-	post(`{"action":"insert","name":"中间","index":1}`)
+	post(`{"action":"add","name":"首位","slot":1}`)
+	post(`{"action":"add","name":"末位","slot":1}`)
+	post(`{"action":"insert","name":"中间","index":1,"slot":1}`)
 	if got := []string{a.queue[0].Username, a.queue[1].Username, a.queue[2].Username}; got[0] != "首位" || got[1] != "中间" || got[2] != "末位" {
 		t.Fatalf("wrong insert order: %v", got)
 	}
-	if w := call("POST", "/api/queue", `{"action":"insert","name":"错误位置","index":99}`, "127.0.0.1:9000"); w.Code != 400 {
+	if w := call("POST", "/api/queue", `{"action":"insert","name":"错误位置","index":99,"slot":1}`, "127.0.0.1:9000"); w.Code != 400 {
 		t.Fatalf("accepted invalid index: %d", w.Code)
 	}
 	if len(a.queue) != 3 {
