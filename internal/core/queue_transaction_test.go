@@ -5,11 +5,13 @@ import (
  "net/http"
  "net/http/httptest"
  "os"
+ "path/filepath"
  "reflect"
  "sync"
  "testing"
 
  "github.com/ZzzHe2333/bilipdj-go/internal/live"
+ "github.com/ZzzHe2333/bilipdj-go/internal/storage"
 )
 
 // Occupying state.json with a directory makes the final atomic os.Rename fail,
@@ -180,4 +182,22 @@ func TestConcurrentConfigSavesCannotRestartStaleWorkers(t *testing.T){
   t.Fatalf("persisted config differed from running worker configuration")
  }
  a.Stop()
+}
+
+func TestLocalQueueDiskRollbackWhenStateWriteFails(t *testing.T){
+ dir:=t.TempDir()
+ a:=New(dir,"test","org/demo")
+ a.queue=[]QueueItem{{Key:"manual:kept",Username:"Keep",Platform:"manual"}}
+ if err:=a.saveLocked();err!=nil{t.Fatal(err)}
+ plan:=storage.Plan{Mode:"managed",User:dir,Active:dir,ArchiveDir:filepath.Join(dir,"Local","archives"),BackupDir:filepath.Join(dir,"Local","backups")}
+ if err:=a.SetStoragePlan(plan);err!=nil{t.Fatal(err)}
+ before:=a.queueSnapshotLocked()
+ unblock:=blockStateFile(t,a)
+ response:=statePost(t,a,"/api/queue",map[string]any{"action":"clear","slot":1})
+ if response.Code!=500{t.Fatalf("expected 500: %d %s",response.Code,response.Body.String())}
+ if !equalSnapshot(a.queueSnapshotLocked(),before){t.Fatal("Local-backed queue changed in memory")}
+ unblock()
+ reloaded:=New(dir,"test","org/demo")
+ if err:=reloaded.SetStoragePlan(plan);err!=nil{t.Fatal(err)}
+ if !equalSnapshot(reloaded.queueSnapshotLocked(),before){t.Fatalf("external queue file not recovered: %+v",reloaded.queue)}
 }
