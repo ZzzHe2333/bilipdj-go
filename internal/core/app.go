@@ -364,7 +364,21 @@ func (a *App) OnDanmu(e live.Event) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if e.Kind == "gift" && e.Platform == "bilibili" && e.Gift != nil {
-		a.processGiftLocked(e)
+        snapshot,err:=a.liveSnapshotLocked()
+        if err!=nil{
+            a.publishLocked(Event{Type:"warning",Data:"礼物资格快照失败，礼物未处理"})
+            return
+        }
+        processed,granted:=a.processGiftLocked(e)
+        if !processed{return}
+        if err=a.saveLocked();err!=nil{
+            if rollbackErr:=a.restoreLiveLocked(snapshot);rollbackErr!=nil{
+                log.Printf("gift persist: %v; rollback: %v",err,rollbackErr)
+            }else{log.Printf("gift persist: %v",err)}
+            a.publishLocked(Event{Type:"warning",Data:"礼物资格保存失败，积分未发放"})
+            return
+        }
+        a.publishLocked(Event{Type:"gift",Data:map[string]any{"event":e,"credit_granted":granted}})
 		return
 	}
 	a.messages = append(a.messages, e)
@@ -374,9 +388,19 @@ func (a *App) OnDanmu(e live.Event) {
 	a.publishLocked(Event{Type: "danmu", Data: e})
 	a.appendLogLocked("INFO", e.Platform, e.Username+"："+e.Content)
 	if a.isBlacklisted(e){return}
+    snapshot,err:=a.liveSnapshotLocked()
+    if err!=nil{
+        log.Printf("queue snapshot: %v",err)
+        a.publishLocked(Event{Type:"warning",Data:"无法建立排队状态快照，弹幕命令已拒绝"})
+        return
+    }
 	if a.processDanmuCommandLocked(e) {
 		if err := a.saveLocked(); err != nil {
-			log.Printf("queue persist: %v", err)
+            if rollbackErr:=a.restoreLiveLocked(snapshot);rollbackErr!=nil{
+                log.Printf("queue persist: %v; rollback: %v",err,rollbackErr)
+            }else{log.Printf("queue persist: %v",err)}
+            a.publishLocked(Event{Type:"warning",Data:"排队操作保存失败，变更已取消"})
+            return
 		}
 		a.publishLocked(Event{Type: "queue", Data: a.queue})
 		a.appendLogLocked("INFO", "queue", fmt.Sprintf("%s 排队操作已更新队列，当前 %d 人（槽位 %d）", e.Username, len(a.queue), a.config.ArchiveSlot))
