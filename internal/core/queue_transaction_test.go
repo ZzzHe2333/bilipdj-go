@@ -5,11 +5,9 @@ import (
  "net/http"
  "net/http/httptest"
  "os"
- "path/filepath"
  "reflect"
  "sync"
  "testing"
- "time"
 
  "github.com/ZzzHe2333/bilipdj-go/internal/live"
 )
@@ -151,6 +149,7 @@ func TestConfigRequiresAdminForRemoteReads(t *testing.T){
 func TestConcurrentConfigSavesCannotRestartStaleWorkers(t *testing.T){
  dir:=t.TempDir()
  a:=New(dir,"test","org/demo")
+ a.listenerFactory=func(string)live.Source{return &fakeRoomSource{}}
  var wg sync.WaitGroup
  start:=make(chan struct{})
  results:=make(chan int,2)
@@ -181,6 +180,4 @@ func TestConcurrentConfigSavesCannotRestartStaleWorkers(t *testing.T){
   t.Fatalf("persisted config differed from running worker configuration")
  }
  a.Stop()
- _=time.Now()
- _=live.Event{}
 }
