@@ -825,39 +825,19 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
-		a.mu.Lock()
-		if cfg.Bilibili.Cookie == "" {
-			cfg.Bilibili.Cookie = a.config.Bilibili.Cookie
-		}
-		if cfg.Douyin.Cookie == "" {
-			cfg.Douyin.Cookie = a.config.Douyin.Cookie
-		}
-        // Older API clients do not send "listeners"; absent is different
-        // from an explicitly empty list submitted by the updated Web UI.
-        if cfg.Listeners==nil&&len(a.config.Listeners)>0 {
-          cfg.Listeners=append([]ListenerConfig{},a.config.Listeners...)
+        suppliedCookies:=explicitCredentialFields(cfg)
+        a.mu.Lock()
+        // Old API clients may omit the entire extra-room list.
+        if cfg.Listeners==nil&&len(a.config.Listeners)>0{
+            cfg.Listeners=append([]ListenerConfig(nil),a.config.Listeners...)
         }
-        // Platform configuration must never rewrite role/blacklist decisions
-        // made through /api/permissions or a live moderator command. A stale
-        // browser tab (or legacy client) does not own these fields.
         cfg.Permissions=a.config.Permissions
         cfg.Admins=a.config.Admins
         cfg.SuperAdmins=a.config.SuperAdmins
         cfg.Guards=a.config.Guards
         cfg.Blacklist=a.config.Blacklist
-        // Queue slot ownership belongs exclusively to /api/queue/slots.
         cfg.ArchiveSlot=a.config.ArchiveSlot
-        // Credential preservation uses immutable instance IDs, not array indices.
-        // Removed IDs do not inherit or leak any old Cookie.
-        byID:=make(map[string]string,len(a.config.Listeners))
-        for _,old:=range a.config.Listeners{byID[old.ID]=old.Cookie}
-        for i:=range cfg.Listeners {
-          if cfg.Listeners[i].Cookie=="" {cfg.Listeners[i].Cookie=byID[cfg.Listeners[i].ID]}
-        }
-		if cfg.Huya.Cookie == "" { cfg.Huya.Cookie = a.config.Huya.Cookie }
-		if cfg.WechatMP.Cookie == "" { cfg.WechatMP.Cookie = a.config.WechatMP.Cookie }
-		if cfg.Kuaishou.Cookie == "" { cfg.Kuaishou.Cookie = a.config.Kuaishou.Cookie }
-		if cfg.Douyu.Cookie == "" { cfg.Douyu.Cookie = a.config.Douyu.Cookie }
+        mergeCurrentCredentials(&cfg,a.config,suppliedCookies)
 		a.mu.Unlock()
 		cfg, e := cleanConfig(cfg)
 		if e != nil {
@@ -873,6 +853,13 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         cfg.Guards=a.config.Guards
         cfg.Blacklist=a.config.Blacklist
         cfg.ArchiveSlot=a.config.ArchiveSlot
+        // Reconcile QR-login credentials that changed during validation.
+        mergeCurrentCredentials(&cfg,a.config,suppliedCookies)
+        if err:=validateRoomListeners(&cfg);err!=nil{
+            a.mu.Unlock()
+            send(w,409,map[string]string{"error":"直播间或 Cookie 已被其他页面修改："+err.Error()})
+            return
+        }
         before:=a.config
 		a.config = cfg
 		// A blacklisted name cannot retain operator/guard roles.
