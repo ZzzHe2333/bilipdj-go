@@ -750,7 +750,10 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         snapshot:=a.queueSnapshotLocked()
 		a.switchSlotLocked(payload.Slot)
 		if e := a.saveLocked(); e != nil {
-            a.restoreQueueLocked(snapshot)
+            if rollbackErr:=a.restoreQueueLocked(snapshot);rollbackErr!=nil{
+                send(w,500,map[string]string{"error":fmt.Sprintf("保存失败: %v；恢复本地队列文件失败: %v",e,rollbackErr)})
+                return
+            }
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
 		}
@@ -1015,7 +1018,10 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		if e := a.saveLocked(); e != nil {
-            a.restoreQueueLocked(snapshot)
+            if rollbackErr:=a.restoreQueueLocked(snapshot);rollbackErr!=nil{
+                send(w,500,map[string]string{"error":fmt.Sprintf("保存失败: %v；恢复本地队列文件失败: %v",e,rollbackErr)})
+                return
+            }
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
 		}
