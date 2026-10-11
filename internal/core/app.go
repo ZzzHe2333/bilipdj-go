@@ -364,7 +364,21 @@ func (a *App) OnDanmu(e live.Event) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if e.Kind == "gift" && e.Platform == "bilibili" && e.Gift != nil {
-		a.processGiftLocked(e)
+        snapshot,err:=a.liveSnapshotLocked()
+        if err!=nil{
+            a.publishLocked(Event{Type:"warning",Data:"礼物资格快照失败，礼物未处理"})
+            return
+        }
+        processed,granted:=a.processGiftLocked(e)
+        if !processed{return}
+        if err=a.saveLocked();err!=nil{
+            if rollbackErr:=a.restoreLiveLocked(snapshot);rollbackErr!=nil{
+                log.Printf("gift persist: %v; rollback: %v",err,rollbackErr)
+            }else{log.Printf("gift persist: %v",err)}
+            a.publishLocked(Event{Type:"warning",Data:"礼物资格保存失败，积分未发放"})
+            return
+        }
+        a.publishLocked(Event{Type:"gift",Data:map[string]any{"event":e,"credit_granted":granted}})
 		return
 	}
 	a.messages = append(a.messages, e)
@@ -374,9 +388,19 @@ func (a *App) OnDanmu(e live.Event) {
 	a.publishLocked(Event{Type: "danmu", Data: e})
 	a.appendLogLocked("INFO", e.Platform, e.Username+"："+e.Content)
 	if a.isBlacklisted(e){return}
+    snapshot,err:=a.liveSnapshotLocked()
+    if err!=nil{
+        log.Printf("queue snapshot: %v",err)
+        a.publishLocked(Event{Type:"warning",Data:"无法建立排队状态快照，弹幕命令已拒绝"})
+        return
+    }
 	if a.processDanmuCommandLocked(e) {
 		if err := a.saveLocked(); err != nil {
-			log.Printf("queue persist: %v", err)
+            if rollbackErr:=a.restoreLiveLocked(snapshot);rollbackErr!=nil{
+                log.Printf("queue persist: %v; rollback: %v",err,rollbackErr)
+            }else{log.Printf("queue persist: %v",err)}
+            a.publishLocked(Event{Type:"warning",Data:"排队操作保存失败，变更已取消"})
+            return
 		}
 		a.publishLocked(Event{Type: "queue", Data: a.queue})
 		a.appendLogLocked("INFO", "queue", fmt.Sprintf("%s 排队操作已更新队列，当前 %d 人（槽位 %d）", e.Username, len(a.queue), a.config.ArchiveSlot))
@@ -801,39 +825,19 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
-		a.mu.Lock()
-		if cfg.Bilibili.Cookie == "" {
-			cfg.Bilibili.Cookie = a.config.Bilibili.Cookie
-		}
-		if cfg.Douyin.Cookie == "" {
-			cfg.Douyin.Cookie = a.config.Douyin.Cookie
-		}
-        // Older API clients do not send "listeners"; absent is different
-        // from an explicitly empty list submitted by the updated Web UI.
-        if cfg.Listeners==nil&&len(a.config.Listeners)>0 {
-          cfg.Listeners=append([]ListenerConfig{},a.config.Listeners...)
+        suppliedCookies:=explicitCredentialFields(cfg)
+        a.mu.Lock()
+        // Old API clients may omit the entire extra-room list.
+        if cfg.Listeners==nil&&len(a.config.Listeners)>0{
+            cfg.Listeners=append([]ListenerConfig(nil),a.config.Listeners...)
         }
-        // Platform configuration must never rewrite role/blacklist decisions
-        // made through /api/permissions or a live moderator command. A stale
-        // browser tab (or legacy client) does not own these fields.
         cfg.Permissions=a.config.Permissions
         cfg.Admins=a.config.Admins
         cfg.SuperAdmins=a.config.SuperAdmins
         cfg.Guards=a.config.Guards
         cfg.Blacklist=a.config.Blacklist
-        // Queue slot ownership belongs exclusively to /api/queue/slots.
         cfg.ArchiveSlot=a.config.ArchiveSlot
-        // Credential preservation uses immutable instance IDs, not array indices.
-        // Removed IDs do not inherit or leak any old Cookie.
-        byID:=make(map[string]string,len(a.config.Listeners))
-        for _,old:=range a.config.Listeners{byID[old.ID]=old.Cookie}
-        for i:=range cfg.Listeners {
-          if cfg.Listeners[i].Cookie=="" {cfg.Listeners[i].Cookie=byID[cfg.Listeners[i].ID]}
-        }
-		if cfg.Huya.Cookie == "" { cfg.Huya.Cookie = a.config.Huya.Cookie }
-		if cfg.WechatMP.Cookie == "" { cfg.WechatMP.Cookie = a.config.WechatMP.Cookie }
-		if cfg.Kuaishou.Cookie == "" { cfg.Kuaishou.Cookie = a.config.Kuaishou.Cookie }
-		if cfg.Douyu.Cookie == "" { cfg.Douyu.Cookie = a.config.Douyu.Cookie }
+        mergeCurrentCredentials(&cfg,a.config,suppliedCookies)
 		a.mu.Unlock()
 		cfg, e := cleanConfig(cfg)
 		if e != nil {
@@ -849,6 +853,13 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         cfg.Guards=a.config.Guards
         cfg.Blacklist=a.config.Blacklist
         cfg.ArchiveSlot=a.config.ArchiveSlot
+        // Reconcile QR-login credentials that changed during validation.
+        mergeCurrentCredentials(&cfg,a.config,suppliedCookies)
+        if err:=validateRoomListeners(&cfg);err!=nil{
+            a.mu.Unlock()
+            send(w,409,map[string]string{"error":"直播间或 Cookie 已被其他页面修改："+err.Error()})
+            return
+        }
         before:=a.config
 		a.config = cfg
 		// A blacklisted name cannot retain operator/guard roles.
