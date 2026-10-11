@@ -89,11 +89,18 @@ func (c Config) effectiveEntry(e live.Event)(PermissionEntry,bool){
  }
  return both,hasBoth
 }
+// A blacklist always overrides any admin, user or part-time role on the
+// same platform. A platform-specific role must not bypass an "all" ban.
+// Old lists can contain platform UserIDs rather than display names; preserve
+// those bans even after structured permission rows have been created.
 func (a *App) isBlacklisted(e live.Event)bool{
- p,ok:=a.config.effectiveEntry(e)
- if ok{return p.Role=="blacklist"}
- if a.config.Permissions!=nil{return false}
- return named(a.config.Blacklist,e.Username)||named(a.config.Blacklist,e.UserID)
+ if e.UserID!=""&&named(a.config.Blacklist,e.UserID){return true}
+ for _,p:=range a.config.permissionRows(){
+  if p.Role!="blacklist"||!(p.Platform=="all"||p.Platform==e.Platform){continue}
+  if strings.EqualFold(p.Name,e.Username){return true}
+ }
+ // Legacy name-only lists remain authoritative until explicitly migrated.
+ return a.config.Permissions==nil&&named(a.config.Blacklist,e.Username)
 }
 func (a *App) commandAllowed(e live.Event,cap string)bool{
  if a.isBlacklisted(e){return false}
@@ -140,7 +147,7 @@ func (a *App) upsertRoleLocked(platform,name,role string)bool{
 func (a *App) removeRoleLocked(platform,name,role string)bool{
  if a.config.Permissions==nil{a.config.Permissions=legacyPermissions(a.config)}
  for i,p:=range a.config.Permissions{
-  if (p.Platform==platform||p.Platform=="all")&&strings.EqualFold(p.Name,name)&&p.Role==role{
+  if p.Platform==platform&&strings.EqualFold(p.Name,name)&&p.Role==role{
    a.config.Permissions=append(a.config.Permissions[:i],a.config.Permissions[i+1:]...)
    if role=="admin"{a.config.Admins=removeName(a.config.Admins,name)}
    if role=="blacklist"{a.config.Blacklist=removeName(a.config.Blacklist,name)}

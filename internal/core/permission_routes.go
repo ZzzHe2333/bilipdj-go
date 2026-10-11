@@ -1,6 +1,9 @@
 package core
 
-import "net/http"
+import (
+ "net/http"
+ "strings"
+)
 
 func (a *App) permissionRoutes(mux *http.ServeMux){
  mux.HandleFunc("GET /api/permissions",func(w http.ResponseWriter,r *http.Request){
@@ -26,9 +29,26 @@ func (a *App) permissionRoutes(mux *http.ServeMux){
   if err!=nil{send(w,400,map[string]string{"error":err.Error()});return}
   a.mu.Lock()
   original:=a.config.Permissions
+  oldLegacyBans:=append([]string(nil),a.config.Blacklist...)
+  // Removing a migrated legacy ban in the new table must also remove the
+  // legacy string (which might contain a UserID) or it would remain active.
+  before:=a.config.permissionRows()
+  for _,prior:=range before{
+   if prior.Role!="blacklist"{continue}
+   stillBlocked:=false
+   for _,next:=range entries{
+    if next.Role=="blacklist"&&next.Platform==prior.Platform&&strings.EqualFold(next.Name,prior.Name){
+     stillBlocked=true;break
+    }
+   }
+   if !stillBlocked{a.config.Blacklist=removeName(a.config.Blacklist,prior.Name)}
+  }
   a.config.Permissions=entries
   err=a.saveLocked()
-  if err!=nil{a.config.Permissions=original}
+  if err!=nil{
+   a.config.Permissions=original
+   a.config.Blacklist=oldLegacyBans
+  }
   a.mu.Unlock()
   if err!=nil{send(w,500,map[string]string{"error":"保存权限失败："+err.Error()});return}
   send(w,200,map[string]any{"status":"ok","entries":entries})
