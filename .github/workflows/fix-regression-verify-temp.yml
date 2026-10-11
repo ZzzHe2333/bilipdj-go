@@ -1,0 +1,42 @@
+name: Verify Permissions and Storage Fixes (Temporary)
+on:
+  push:
+    branches: [fix/permissions-config-storage-races]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.23'}
+      - name: Web syntax check
+        run: node --check web/app.js && node --check web/queue-standalone.js
+      - name: Go unit tests and vet
+        run: go test ./... && go vet ./...
+      - name: Go race tests
+        run: go test -race ./...
+  cross:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows, arch: amd64}
+          - {os: windows, arch: arm64}
+          - {os: linux, arch: amd64}
+          - {os: linux, arch: arm64}
+          - {os: darwin, arch: amd64}
+          - {os: darwin, arch: arm64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.23'}
+      - name: Cross-compile only, never publish
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: go build -trimpath -o /tmp/bilipdj-go-test .
