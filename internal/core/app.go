@@ -799,9 +799,16 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         if cfg.Listeners==nil&&len(a.config.Listeners)>0 {
           cfg.Listeners=append([]ListenerConfig{},a.config.Listeners...)
         }
-        if cfg.Permissions==nil&&a.config.Permissions!=nil{
-           cfg.Permissions=append([]PermissionEntry{},a.config.Permissions...)
-        }
+        // Platform configuration must never rewrite role/blacklist decisions
+        // made through /api/permissions or a live moderator command. A stale
+        // browser tab (or legacy client) does not own these fields.
+        cfg.Permissions=a.config.Permissions
+        cfg.Admins=a.config.Admins
+        cfg.SuperAdmins=a.config.SuperAdmins
+        cfg.Guards=a.config.Guards
+        cfg.Blacklist=a.config.Blacklist
+        // Queue slot ownership belongs exclusively to /api/queue/slots.
+        cfg.ArchiveSlot=a.config.ArchiveSlot
         // Credential preservation uses immutable instance IDs, not array indices.
         // Removed IDs do not inherit or leak any old Cookie.
         byID:=make(map[string]string,len(a.config.Listeners))
@@ -820,9 +827,14 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 			return
 		}
 		a.mu.Lock()
-		if cfg.ArchiveSlot != a.config.ArchiveSlot {
-			a.switchSlotLocked(cfg.ArchiveSlot)
-		}
+        // Re-read immediately before commit: permissions and queue slot can
+        // change while cleanConfig runs outside the lock.
+        cfg.Permissions=a.config.Permissions
+        cfg.Admins=a.config.Admins
+        cfg.SuperAdmins=a.config.SuperAdmins
+        cfg.Guards=a.config.Guards
+        cfg.Blacklist=a.config.Blacklist
+        cfg.ArchiveSlot=a.config.ArchiveSlot
 		a.config = cfg
 		// A blacklisted name cannot retain operator/guard roles.
 		a.stripBlacklistedRolesLocked()
