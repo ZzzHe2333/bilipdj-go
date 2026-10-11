@@ -59,11 +59,7 @@ func (a *App) styleSlotRoutes(mux *http.ServeMux) {
   for k,v:=range stored{cloned[k]=v}
   raw,e:=json.Marshal(cloned)
   if e!=nil{a.mu.Unlock();send(w,500,map[string]string{"error":"样式编码失败"});return}
-  before:=a.style
-  a.style=cloned
-  e=a.saveLocked()
-  if e==nil{e=a.writeWebAppearanceFile("style",raw)}
-  if e!=nil{a.style=before}else{a.publishLocked(Event{Type:"style",Data:cloned})}
+  e=a.persistWebSettingsLocked("style",cloned,raw)
   a.mu.Unlock()
   if e!=nil{send(w,500,map[string]string{"error":e.Error()});return}
   send(w,200,map[string]any{"status":"ok","slot":n,"style":cloned})
