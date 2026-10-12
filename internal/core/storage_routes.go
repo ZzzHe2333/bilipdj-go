@@ -97,7 +97,7 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 			send(w, 500, map[string]string{"error": "存档备份失败: " + err.Error()})
 			return
 		}
-		beforeSlots, beforeQueue := a.slots, a.queue
+        snapshot:=a.queueSnapshotLocked()
 		next := make(map[string][]QueueItem, len(a.slots))
 		for k, v := range a.slots {
 			next[k] = append([]QueueItem{}, v...)
@@ -110,9 +110,13 @@ func (a *App) storageRoutes(mux *http.ServeMux) {
 			a.queue = append([]QueueItem{}, v...)
 		}
 		if err = a.saveLocked(); err != nil {
-			a.slots, a.queue = beforeSlots, beforeQueue
+            recoverErr:=a.restoreQueueLocked(snapshot)
 			a.mu.Unlock()
-			send(w, 500, map[string]string{"error": "Go 状态写入失败: " + err.Error()})
+            if recoverErr!=nil{
+                send(w,500,map[string]string{"error":fmt.Sprintf("Go 状态写入失败: %v；Local 队列回滚失败: %v",err,recoverErr)})
+            }else{
+			    send(w, 500, map[string]string{"error": "Go 状态写入失败（已恢复原队列）: " + err.Error()})
+            }
 			return
 		}
 		a.publishLocked(Event{Type: "queue", Data: a.queue})

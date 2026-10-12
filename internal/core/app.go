@@ -352,7 +352,14 @@ func (a *App) publishStatus(s live.Status) {
 	a.publishLocked(Event{Type: "status", Data: s})
 	a.mu.Unlock()
 }
+// OnDanmu handles direct events without a listener lifecycle guard.
 func (a *App) OnDanmu(e live.Event) {
+ a.onDanmuGuarded(e,nil,0)
+}
+
+// Check listener validity and mutate the queue under the SAME App lock.
+// Old canceled room events are rejected after a targeted reconnect.
+func (a *App) onDanmuGuarded(e live.Event, ctx context.Context, generation uint64) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
@@ -363,6 +370,7 @@ func (a *App) OnDanmu(e live.Event) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+    if ctx!=nil&&(ctx.Err()!=nil||a.listenerGeneration!=generation){return}
 	if e.Kind == "gift" && e.Platform == "bilibili" && e.Gift != nil {
         snapshot,err:=a.liveSnapshotLocked()
         if err!=nil{
@@ -448,20 +456,14 @@ func (a *App) startListenerLocked(pc ListenerConfig,generation uint64) {
  room,cookie,platform:=pc.Room,pc.Cookie,pc.Platform
  go source.Run(ctx,room,cookie,
   func(e live.Event){
-   if ctx.Err()!=nil{return}
-   a.mu.RLock()
-   current:=a.listenerGeneration==generation
-   a.mu.RUnlock()
-   if !current||ctx.Err()!=nil{return}
    e.InstanceID=id
    e.Platform=platform
-   a.OnDanmu(e) // all room instances share the original queue/archive
+   a.onDanmuGuarded(e,ctx,generation)
   },
   func(s live.Status){
-   if ctx.Err()!=nil{return}
    s.Platform=platform
    s.InstanceID=id
-   a.publishInstanceStatus(s,generation)
+   a.publishInstanceStatus(s,generation,ctx)
   },
  )
 }
@@ -479,10 +481,10 @@ func (a *App) refreshListener(id string) {
  }
 }
 
-func (a *App) publishInstanceStatus(s live.Status,generation uint64) {
+func (a *App) publishInstanceStatus(s live.Status,generation uint64,ctx context.Context) {
  a.mu.Lock()
  defer a.mu.Unlock()
- if a.listenerGeneration!=generation{return}
+ if a.listenerGeneration!=generation||ctx.Err()!=nil{return}
  prior,ok:=a.statuses[s.InstanceID]
  a.statuses[s.InstanceID]=s
  if !ok||prior.Connected!=s.Connected||prior.Message!=s.Message {
