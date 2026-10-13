@@ -135,10 +135,19 @@ func (state *trayControl) removeIcon() {
 
 // The tray icon must disappear before the HTTP server's graceful shutdown
 // (which can legitimately take up to 10 seconds). Keep cleanup nonblocking.
+// This ordering can be checked without invoking Win32 APIs in unit tests.
+func beginTrayExit(removeIcon, closeWindow, requestShutdown func()) {
+    removeIcon()
+    closeWindow()
+    requestShutdown()
+}
+
 func (state *trayControl) requestQuit(hwnd uintptr) {
-    state.removeIcon()
-    procPostMessage.Call(hwnd, wmClose, 0, 0)
-    if state.quit != nil { state.quit() }
+    beginTrayExit(state.removeIcon, func() {
+        procPostMessage.Call(hwnd, wmClose, 0, 0)
+    }, func() {
+        if state.quit != nil { state.quit() }
+    })
 }
 
 // The committed Base64 asset decodes to a standard multi-resolution .ico file.
