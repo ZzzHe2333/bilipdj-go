@@ -41,7 +41,18 @@ func (a *App) permissionRoutes(mux *http.ServeMux){
      stillBlocked=true;break
     }
    }
-   if !stillBlocked{a.config.Blacklist=removeName(a.config.Blacklist,prior.Name)}
+   if !stillBlocked{
+    // Another platform may still have a scoped ban for this nickname.
+    // Only remove the old-format mirror when no ban remains anywhere.
+    remainingBan:=false
+    for _,next:=range entries{
+     if next.Role=="blacklist"&&strings.EqualFold(next.Name,prior.Name){
+      remainingBan=true
+      break
+     }
+    }
+    if !remainingBan{a.config.Blacklist=removeName(a.config.Blacklist,prior.Name)}
+   }
   }
   a.config.Permissions=entries
   err=a.saveLocked()
