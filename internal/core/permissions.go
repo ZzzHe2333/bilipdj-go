@@ -93,8 +93,22 @@ func (c Config) effectiveEntry(e live.Event)(PermissionEntry,bool){
 // same platform. A platform-specific role must not bypass an "all" ban.
 // Old lists can contain platform UserIDs rather than display names; preserve
 // those bans even after structured permission rows have been created.
+// Legacy Blacklist stored user IDs and sometimes nicknames. Older Go
+// versions mirrored a per-platform nickname ban into the old global list.
+// When that nickname is numeric, it must not become a global UserID ban.
+// An explicit "all" row still preserves legacy UserID blocks upon migration.
+func (a *App) isLegacyUserIDBlacklisted(uid string)bool{
+ if uid==""||!named(a.config.Blacklist,uid){return false}
+ scopedMirror:=false
+ for _,p:=range a.config.Permissions {
+  if p.Role!="blacklist"||!strings.EqualFold(p.Name,uid){continue}
+  if p.Platform=="all"{return true}
+  scopedMirror=true
+ }
+ return !scopedMirror
+}
 func (a *App) isBlacklisted(e live.Event)bool{
- if e.UserID!=""&&named(a.config.Blacklist,e.UserID){return true}
+ if a.isLegacyUserIDBlacklisted(e.UserID){return true}
  for _,p:=range a.config.permissionRows(){
   if p.Role!="blacklist"||!(p.Platform=="all"||p.Platform==e.Platform){continue}
   if strings.EqualFold(p.Name,e.Username){return true}
@@ -150,7 +164,18 @@ func (a *App) removeRoleLocked(platform,name,role string)bool{
   if p.Platform==platform&&strings.EqualFold(p.Name,name)&&p.Role==role{
    a.config.Permissions=append(a.config.Permissions[:i],a.config.Permissions[i+1:]...)
    if role=="admin"{a.config.Admins=removeName(a.config.Admins,name)}
-   if role=="blacklist"{a.config.Blacklist=removeName(a.config.Blacklist,name)}
+   if role=="blacklist"{
+    // Do not discard the mirror while a different platform still bans
+    // this nickname. Scoped permissions remain the authority.
+    otherBan:=false
+    for _,entry:=range a.config.Permissions {
+     if entry.Role=="blacklist"&&strings.EqualFold(entry.Name,name){
+      otherBan=true
+      break
+     }
+    }
+    if !otherBan{a.config.Blacklist=removeName(a.config.Blacklist,name)}
+   }
    return true
   }
  }
