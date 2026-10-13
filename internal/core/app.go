@@ -620,8 +620,17 @@ func (a *App) isAdmin(r *http.Request) bool {
 		return false
 	}
 	ip := net.ParseIP(host)
-	hostname := strings.Split(r.Host, ":")[0]
-	return ip != nil && ip.IsLoopback() && (hostname == "127.0.0.1" || hostname == "localhost" || hostname == "[::1]")
+    // SplitHostPort understands bracketed IPv6 literals such as [::1]:9816.
+    // strings.Split(r.Host, ":") previously produced "[" and denied a
+    // legitimate local IPv6 admin connection with HTTP 403.
+    hostname:=r.Host
+    if parsed,_,err:=net.SplitHostPort(r.Host);err==nil{
+        hostname=parsed
+    }else if strings.HasPrefix(r.Host,"[")&&strings.HasSuffix(r.Host,"]"){
+        hostname=strings.TrimSuffix(strings.TrimPrefix(r.Host,"["),"]")
+    }
+    return ip!=nil&&ip.IsLoopback()&&
+        (hostname=="127.0.0.1"||hostname=="localhost"||hostname=="::1")
 }
 func (a *App) Routes(ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
