@@ -111,6 +111,34 @@ type trayControl struct {
 	quit      func()
 	icon      notifyIcon
 	ownsIcon  bool // CreateIconFromResourceEx requires DestroyIcon
+    iconAdded bool // NIM_ADD succeeded; remove immediately on explicit Exit
+}
+
+// removeIconWith is idempotent after a successful NIM_DELETE. If Explorer
+// rejects removal, leave iconAdded set so WM_DESTROY can retry. Only the tray
+// message-loop goroutine calls this method.
+func (state *trayControl) removeIconWith(deleteIcon func(*notifyIcon) bool) {
+    if state == nil || !state.iconAdded { return }
+    if deleteIcon(&state.icon) { state.iconAdded = false }
+}
+
+func (state *trayControl) removeIcon() {
+    state.removeIconWith(func(icon *notifyIcon) bool {
+        ok, _, err := procShellNotify.Call(nimDelete, uintptr(unsafe.Pointer(icon)))
+        if ok == 0 {
+            log.Printf("failed to remove system tray icon: %v", err)
+            return false
+        }
+        return true
+    })
+}
+
+// The tray icon must disappear before the HTTP server's graceful shutdown
+// (which can legitimately take up to 10 seconds). Keep cleanup nonblocking.
+func (state *trayControl) requestQuit(hwnd uintptr) {
+    state.removeIcon()
+    procPostMessage.Call(hwnd, wmClose, 0, 0)
+    if state.quit != nil { state.quit() }
 }
 
 // The committed Base64 asset decodes to a standard multi-resolution .ico file.
@@ -242,7 +270,8 @@ func trayWindowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 						}
 					}
 				case menuQuit:
-					state.quit()
+                    // Delete the icon synchronously, not after server.Shutdown.
+                    state.requestQuit(hwnd)
 				}
 				procPostMessage.Call(hwnd, 0, 0, 0)
 			}
@@ -255,7 +284,7 @@ func trayWindowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 	case wmDestroy:
 		if state != nil {
-			procShellNotify.Call(nimDelete, uintptr(unsafe.Pointer(&state.icon)))
+            state.removeIcon() // also handles normal window close and retry on failure
 		}
 		procPostQuit.Call(0)
 		return 0
@@ -309,6 +338,7 @@ func runTray(url string, quit func(), ready chan<- uintptr) {
 		ready <- 0
 		return
 	}
+    state.iconAdded = true
 	ready <- hwnd
 	var msg winMessage
 	for {
