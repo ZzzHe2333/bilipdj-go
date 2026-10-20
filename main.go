@@ -10,6 +10,7 @@ import (
 	"github.com/ZzzHe2333/bilipdj-go/internal/storage"
 	"github.com/ZzzHe2333/bilipdj-go/internal/update"
 	"io/fs"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -89,6 +90,10 @@ func main() {
 		log.Fatal(err)
 	}
 	app := core.New(path, version, "ZzzHe2333/bilipdj-go")
+    // GUI-subsystem builds have no visible console. Preserve the standard
+    // logger and subprocess diagnostics in the persistent user-data logs/.
+    log.SetOutput(io.MultiWriter(os.Stderr, app.DiagnosticOutput()))
+    log.Printf("BiliPDJ-GO %s starting; data directory=%s; listen=%s", version, path, *listen)
 	app.SetDouyinCollectorListen(*listen)
 	if err := app.SetStoragePlan(plan); err != nil {
 		desktopError("读取 Go 队列存档失败（未覆盖旧数据）：\n" + err.Error())
@@ -115,6 +120,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	app.Start()
+	log.Printf("BiliPDJ-GO HTTP server started: %s", listener.Addr().String())
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
