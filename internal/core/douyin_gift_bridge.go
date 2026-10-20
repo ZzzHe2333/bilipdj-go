@@ -20,7 +20,7 @@ import (
 // The browser bridge is optional and read-only. A browser event can NEVER
 // grant paid queue credits: an extension/page is not a payment authority.
 const douyinBridgeMaxBody = 1500000
-const douyinComboIdle = 4 * time.Second
+const douyinComboIdle = 10 * time.Second
 
 type douyinBinding struct { liveID, roomID string; seenAt time.Time }
 type douyinCombo struct {
@@ -237,7 +237,8 @@ func finishDouyinCombo(instance string, p *douyinCombo) (live.Event, bool) {
         Kind:"gift", Platform:"douyin", InstanceID:instance,
         UserID:g.UserID, Username:g.Username, Time:time.Now(),
         Gift:&live.Gift{EventID:comboID, Name:g.GiftName, GiftID:g.GiftID,
-            Count:count, Diamonds:g.UnitDiamonds*int64(count), RoomID:g.RoomID},
+            Count:count, Diamonds:g.UnitDiamonds*int64(count), UnitDiamonds:g.UnitDiamonds, RoomID:g.RoomID,
+            AvatarURL:g.AvatarURL, Description:g.GiftDescription},
     }, true
 }
 func (a *App) flushDouyinCombo(key, instance, liveID string) {
