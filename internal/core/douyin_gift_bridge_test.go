@@ -94,7 +94,7 @@ func TestDouyinComboTimeout(t *testing.T) {
     // Simulate idle for deterministic testing rather than sleeping four seconds.
     b:=a.douyinBridge
     b.mu.Lock()
-    for _,p:=range b.pending {p.timer.Stop();p.lastSeen=time.Now().Add(-5*time.Second)}
+    for _,p:=range b.pending {p.timer.Stop();p.lastSeen=time.Now().Add(-11*time.Second)}
     var key string
     for k:=range b.pending {key=k}
     b.mu.Unlock()
