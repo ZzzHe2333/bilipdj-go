@@ -1203,6 +1203,21 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+        if r.Method==http.MethodPost||r.Method==http.MethodPut||r.Method==http.MethodPatch||r.Method==http.MethodDelete {
+            // Diagnostic logging never captures the request body, cookies,
+            // token headers or URL query values. Exclude high-frequency
+            // gift frames and the browser diagnostic endpoint itself.
+            writer:=&statusLogWriter{ResponseWriter:w}
+            mux.ServeHTTP(writer,r)
+            if r.URL.Path!="/api/douyin/bridge/frame"&&r.URL.Path!="/api/logs/client" {
+                if writer.status>=400 {
+                    a.logEvent("ERROR","http",fmt.Sprintf("%s %s => HTTP %d",r.Method,r.URL.Path,writer.status))
+                }else if writer.status>=200&&writer.status<300{
+                    a.logEvent("INFO","http",fmt.Sprintf("%s %s => HTTP %d",r.Method,r.URL.Path,writer.status))
+                }
+            }
+            return
+        }
 		mux.ServeHTTP(w, r)
 	})
 }
