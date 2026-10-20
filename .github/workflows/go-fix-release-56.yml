@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   release:
-    if: github.ref == 'refs/heads/release/v0.10.6-test'
+    if: github.ref == 'refs/heads/release/v0.10.7-test'
     needs: [test, build]
     runs-on: ubuntu-latest
     steps:
