@@ -22,7 +22,7 @@ import (
 const douyinBridgeMaxBody = 1500000
 const douyinComboIdle = 4 * time.Second
 
-type douyinBinding struct { liveID, roomID string }
+type douyinBinding struct { liveID, roomID string; seenAt time.Time }
 type douyinCombo struct {
     update live.DouyinGiftUpdate
     count int
@@ -153,7 +153,7 @@ func (a *App) receiveDouyinGiftFrame(w http.ResponseWriter, r *http.Request) {
     b := a.douyinBridge
     b.mu.Lock()
     binding := b.bindings[req.InstanceID]
-    if binding.liveID != "" && binding.liveID != req.LiveID {
+    if binding.liveID != "" && (binding.liveID != req.LiveID || time.Since(binding.seenAt) > 10*time.Minute) {
         // The app's room configuration has changed. Reset the binding only
         // after its listener configuration has been validated above.
         delete(b.bindings, req.InstanceID)
@@ -165,8 +165,9 @@ func (a *App) receiveDouyinGiftFrame(w http.ResponseWriter, r *http.Request) {
             send(w, 409, map[string]string{"error": "room ID changed during bridge session"})
             return
         }
-        if binding.roomID == "" { binding = douyinBinding{req.LiveID, g.RoomID} }
+        if binding.roomID == "" { binding = douyinBinding{liveID:req.LiveID, roomID:g.RoomID} }
     }
+    binding.seenAt = time.Now()
     b.bindings[req.InstanceID] = binding
     if len(b.closed) > 2048 {
         for key, completed := range b.closed {
@@ -197,6 +198,7 @@ func (a *App) receiveDouyinGiftFrame(w http.ResponseWriter, r *http.Request) {
             }
         }
         pending := b.pending[key]
+        if pending == nil && len(b.pending) >= 4096 { continue }
         if pending == nil {
             pending = &douyinCombo{update:g}
             b.pending[key] = pending
