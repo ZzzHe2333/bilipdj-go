@@ -38,6 +38,8 @@ type douyinGiftBridge struct {
     seenOrder []string
     pending map[string]*douyinCombo
     closed map[string]douyinClosed
+    settled int64
+    lastGift time.Time
 }
 
 func newDouyinGiftBridge() *douyinGiftBridge {
@@ -70,6 +72,23 @@ func (a *App) installDouyinBridgeRoutes(mux *http.ServeMux) {
             "note": "Temporary pairing token; expires when BiliPDJ-GO restarts. Do not share."})
     })
     mux.HandleFunc("POST /api/douyin/bridge/frame", a.receiveDouyinGiftFrame)
+    mux.HandleFunc("GET /api/douyin/bridge/status", func(w http.ResponseWriter, r *http.Request) {
+        if !douyinIsLoopback(r) || !a.isAdmin(r) {
+            send(w, 403, map[string]string{"error":"loopback admin only"})
+            return
+        }
+        b := a.douyinBridge
+        b.mu.Lock()
+        rooms := make(map[string]map[string]string)
+        for instance, binding := range b.bindings {
+            rooms[instance] = map[string]string{"live_id":binding.liveID,"room_id":binding.roomID}
+        }
+        response := map[string]any{"rooms":rooms,"pending_combos":len(b.pending),
+            "settled_events":b.settled,"last_gift_at":b.lastGift}
+        b.mu.Unlock()
+        w.Header().Set("Cache-Control","no-store")
+        send(w,200,response)
+    })
 }
 
 func (a *App) bridgeListener(instance, liveID string) bool {
@@ -237,5 +256,10 @@ func (a *App) flushDouyinCombo(key, instance, liveID string) {
 func (a *App) emitDouyinBridgeGift(event live.Event, liveID string) {
     if !a.bridgeListener(event.InstanceID, liveID) { return }
     a.onDanmuGuarded(event, nil, 0)
+    b := a.douyinBridge
+    b.mu.Lock()
+    b.settled++
+    b.lastGift = time.Now()
+    b.mu.Unlock()
 }
 
