@@ -15,6 +15,8 @@ type Gift struct {
 	CoinType string `json:"coin_type,omitempty"`
 	GiftID   int64  `json:"gift_id,omitempty"`
 	GuardBuy bool   `json:"guard_buy,omitempty"`
+	Diamonds int64 `json:"diamonds,omitempty"` // Douyin diamonds; never Bilibili batteries
+	RoomID string `json:"room_id,omitempty"`
 }
 
 type Event struct {
