@@ -74,7 +74,15 @@ func (a *App) collectorRooms() ([]string,error) {
 func (a *App) startDouyinCollector(mode string) error {
  if mode!="login"&&mode!="run"&&mode!="check"{return errors.New("无效动作")}
  node,err:=exec.LookPath("node")
- if err!=nil{return errors.New("需要安装 Node.js 22+ 并加入 PATH")}
+ if err!=nil{
+  choices:=[]string{filepath.Join(os.Getenv("ProgramFiles"),"nodejs","node.exe"),
+   filepath.Join(os.Getenv("ProgramFiles(x86)"),"nodejs","node.exe")}
+  for _,candidate:=range choices {
+   if !filepath.IsAbs(candidate){continue}
+   if st,e:=os.Stat(candidate);e==nil&&!st.IsDir(){node=candidate;err=nil;break}
+  }
+ }
+ if err!=nil{return errors.New("没有找到 Node.js 22+；请安装 Node.js 后重启 BiliPDJ-GO，让系统刷新 PATH")}
  versionBytes,versionErr:=exec.Command(node,"--version").Output()
  if versionErr!=nil{return errors.New("无法获取 Node.js 版本")}
  major,parseErr:=strconv.Atoi(strings.SplitN(strings.TrimPrefix(strings.TrimSpace(string(versionBytes)),"v"),".",2)[0])
@@ -105,7 +113,7 @@ func (a *App) startDouyinCollector(mode string) error {
  setDouyinNodeHidden(cmd)
  cmd.Env=append(os.Environ(),"PDJ_DOUYIN_BRIDGE_TOKEN="+a.douyinBridge.token)
  // The child writes a sanitized health report; secrets never enter ordinary logs.
- cmd.Stdout=nil;cmd.Stderr=nil
+ cmd.Stdout=a.DiagnosticOutput();cmd.Stderr=a.DiagnosticOutput()
  if err:=cmd.Start();err!=nil{return fmt.Errorf("启动抖音浏览器失败：%w",err)}
  c.cmd=cmd;c.mode=mode;c.debugPort=port;c.startedAt=time.Now();c.lastError=""
  go func(){
@@ -211,7 +219,11 @@ func (a *App) installDouyinCollectorRoutes(mux *http.ServeMux) {
   case "stop":err=a.stopDouyinCollector()
   default:send(w,400,map[string]string{"error":"action must be login/check/start/stop"});return
   }
-  if err!=nil{send(w,409,map[string]string{"error":err.Error()});return}
+  if err!=nil{
+   a.logEvent("ERROR","douyin","采集器操作 "+req["action"]+" 失败："+err.Error())
+   send(w,409,map[string]string{"error":err.Error()+"。请查看「运行日志」和 logs 文件夹中的详细记录。"});return
+  }
+  a.logEvent("INFO","douyin","采集器操作 "+req["action"]+" 已接受")
   send(w,200,a.douyinCollectorState())
  })
 }
