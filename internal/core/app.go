@@ -129,6 +129,7 @@ type App struct {
 	giftUsed            map[string]bool
 	giftSeen            []string
 	giftLast            *live.Event
+	douyinRecent        []live.Event
 	douyinBridge        *douyinGiftBridge
 	douyinCollector     *douyinCollectorProcess
 	douyinCollectorPort int
@@ -381,6 +382,8 @@ func (a *App) onDanmuGuarded(e live.Event, ctx context.Context, generation uint6
 		// Browser-derived gift events are observational only; never mint queue credits.
 		copyEvent := e
 		a.giftLast = &copyEvent
+        a.douyinRecent = append(a.douyinRecent, e)
+        if len(a.douyinRecent) > 100 { a.douyinRecent = append([]live.Event{}, a.douyinRecent[len(a.douyinRecent)-100:]...) }
 		a.publishLocked(Event{Type:"gift",Data:map[string]any{"event":e,"credit_granted":false}})
 		a.appendLogLocked("INFO",e.Platform,fmt.Sprintf("[%s] %s 送出 %s x%d（%d钻，浏览器观测）",e.InstanceID,e.Username,e.Gift.Name,e.Gift.Count,e.Gift.Diamonds))
 		return
