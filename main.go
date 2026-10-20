@@ -89,6 +89,7 @@ func main() {
 		log.Fatal(err)
 	}
 	app := core.New(path, version, "ZzzHe2333/bilipdj-go")
+	app.SetDouyinCollectorListen(*listen)
 	if err := app.SetStoragePlan(plan); err != nil {
 		desktopError("读取 Go 队列存档失败（未覆盖旧数据）：\n" + err.Error())
 		log.Fatal(err)
