@@ -71,8 +71,7 @@ func TestPersistentLogCredentialRedaction(t *testing.T){
  dir:=t.TempDir()
  d:=newDiagnosticFiles(dir)
  defer d.Close()
- _,err:=d.Write([]byte("login error: sessionid=123secret; SESSDATA=topsecret; PDJ_DOUYIN_BRIDGE_TOKEN=do-not-keep
-"))
+ _,err:=d.Write([]byte("login error: sessionid=123secret; SESSDATA=topsecret; PDJ_DOUYIN_BRIDGE_TOKEN=do-not-keep\n"))
  if err!=nil{t.Fatal(err)}
  if err:=d.line("ERROR","douyin","X-PDJ-Bridge-Token=abc access_token=xyz");err!=nil{t.Fatal(err)}
  files,_:=filepath.Glob(filepath.Join(dir,"logs","bilipdj-*.log"))
