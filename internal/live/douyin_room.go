@@ -46,19 +46,6 @@ func (d Douyin) InspectRoom(ctx context.Context, webRID, cookie string) (DouyinR
  if resp.StatusCode!=http.StatusOK{return result,fmt.Errorf("抖音 room/enter HTTP %d",resp.StatusCode)}
  bytes,err:=io.ReadAll(io.LimitReader(resp.Body,2<<20))
  if err!=nil{return result,err}
- var payload struct {
-  Data struct {
-   Data []struct {
-    Status int
-    Title string
-    UserCountStr string
-    Owner struct {
-     Nickname string
-     IDStr string
-    }
-   }
-  }
- }
  // Use a local named type with explicit tags? The wire API uses snake_case;
  // decode a narrow map to avoid a large generated schema.
  var doc map[string]json.RawMessage
