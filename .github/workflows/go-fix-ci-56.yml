@@ -1,4 +1,4 @@
-name: BiliPDJ-Go Issue 56 Fix Validation
+name: BiliPDJ-Go Issue 56 Fix Validation Round 2
 on:
   push:
     branches: [fix/go-logs-save-56]
