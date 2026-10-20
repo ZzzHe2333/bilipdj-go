@@ -6,6 +6,7 @@
 <label>本地监听端口<input id="port" type="number" min="1" max="65535" value="9816"></label>
 <label>监听实例 ID<input id="instance" value="douyin"></label>
 <label>配对令牌<input id="token" type="password" autocomplete="off"></label>
+<label>多房间映射（每行：直播网页 ID=Go 实例 ID，留空使用默认实例）<textarea id="roomMap" rows="4" style="width:100%;box-sizing:border-box" placeholder="980468525827=douyin\n730127423738=douyin-mroom001"></textarea></label>
 <button id="save">保存</button> <span id="status" role="status"></span>
 <p>在 Go 控制台启用对应抖音直播间，然后打开相同房间的已登录抖音网页。只接收礼物事件，不会修改或发送抖音消息。浏览器礼物事件不自动授予付费排队资格。</p>
 <script src="options.js"></script></body></html>
