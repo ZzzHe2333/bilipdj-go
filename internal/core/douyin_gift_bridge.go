@@ -72,6 +72,17 @@ func (a *App) installDouyinBridgeRoutes(mux *http.ServeMux) {
             "note": "Temporary pairing token; expires when BiliPDJ-GO restarts. Do not share."})
     })
     mux.HandleFunc("POST /api/douyin/bridge/frame", a.receiveDouyinGiftFrame)
+    mux.HandleFunc("GET /api/douyin/gifts/recent", func(w http.ResponseWriter,r *http.Request) {
+        if !douyinIsLoopback(r) || !a.isAdmin(r) {
+            send(w,403,map[string]string{"error":"local admin only"});return
+        }
+        a.mu.RLock()
+        items:=append([]live.Event(nil),a.douyinRecent...)
+        a.mu.RUnlock()
+        w.Header().Set("Cache-Control","no-store")
+        send(w,200,map[string]any{"events":items})
+    })
+
     mux.HandleFunc("GET /api/douyin/bridge/status", func(w http.ResponseWriter, r *http.Request) {
         if !douyinIsLoopback(r) || !a.isAdmin(r) {
             send(w, 403, map[string]string{"error":"loopback admin only"})
