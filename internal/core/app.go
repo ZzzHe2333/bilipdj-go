@@ -145,6 +145,7 @@ type App struct {
 	listenerGeneration  uint64
 	listenerFactory     func(string) live.Source
 	dataPath            string
+	diagnostic          *diagnosticFiles
 	queuePath           string
 	queueExternal       bool
 	version             string
@@ -174,6 +175,7 @@ func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
 
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), styleSlots: map[string]map[string]any{}, appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a.diagnostic = newDiagnosticFiles(dataDir)
 	a.douyinBridge = newDouyinGiftBridge()
 	a.douyinCollector = newDouyinCollectorProcess()
 	a.douyinCollectorPort = 9816
@@ -511,6 +513,7 @@ func (a *App) publishInstanceStatus(s live.Status,generation uint64,ctx context.
 }
 func (a *App) Stop() {
 	a.shutdownDouyinCollector()
+	a.logEvent("INFO","system","BiliPDJ Go 正在退出")
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, stop := range a.workers {
@@ -667,6 +670,10 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		send(w, 200, a.performance.Sample())
 	})
+	mux.HandleFunc("GET /api/logs/info", func(w http.ResponseWriter, r *http.Request) {
+        if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
+        send(w,200,map[string]any{"dir":a.DiagnosticDirectory(),"rotation":"10 MiB per file, 14 days","file_name":"bilipdj-YYYY-MM-DD.log"})
+    })
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
@@ -853,6 +860,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		}
 		var cfg Config
 		if e := decodeLimit(r, &cfg, 512<<10); e != nil {
+            a.logEvent("ERROR","system","配置保存失败：JSON 解析错误 "+e.Error())
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
@@ -872,6 +880,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		a.mu.Unlock()
 		cfg, e := cleanConfig(cfg)
 		if e != nil {
+            a.logEvent("ERROR","system","配置保存校验失败："+e.Error())
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
@@ -888,6 +897,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         mergeCurrentCredentials(&cfg,a.config,suppliedCookies)
         if err:=validateRoomListeners(&cfg);err!=nil{
             a.mu.Unlock()
+            a.logEvent("ERROR","system","配置保存冲突："+err.Error())
             send(w,409,map[string]string{"error":"直播间或 Cookie 已被其他页面修改："+err.Error()})
             return
         }
@@ -899,6 +909,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         if e!=nil {
             a.config=before
             a.mu.Unlock()
+            a.logEvent("ERROR","system","配置写盘失败："+e.Error())
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
         }
