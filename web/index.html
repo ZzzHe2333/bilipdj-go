@@ -112,6 +112,24 @@
     <details class="channel-advanced"><summary>高级：手动填写 B站 Cookie</summary><textarea v-model="config.bilibili.cookie" rows="2" :placeholder="cookieConfigured.bilibili?'已保存，留空保留':'手动粘贴 Cookie'"></textarea></details>
   </template>
   <template v-else-if="p.id==='douyin'"><p class="tip">可直接输入数字房间号，或粘贴 live.douyin.com 网址及包含网址的分享文案，自动解析。短链接需先在浏览器展开。</p>
+  <div class="channel-advanced" style="margin:12px 0;padding:12px;border:1px solid var(--border,#39445a);border-radius:9px">
+   <h3 style="margin:0 0 6px">抖音账号登录与后台礼物采集</h3>
+   <p class="tip">需要本机 Node.js 22+ 与 Chrome/Edge。首次扫码使用独立浏览器资料目录；登录完成后，后台浏览器自动复用登录态、监听全部已保存启用的抖音房间。不会把 Cookie 复制到 Go 配置或前端。</p>
+   <div class="channel-login">
+    <button type="button" class="btn primary small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('login')">打开抖音扫码登录</button>
+    <button type="button" class="btn small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('start')">启动后台礼物采集</button>
+    <button type="button" class="btn small" :disabled="douyinCollectorBusy||!douyinCollector.running" @click="controlDouyinCollector('stop')">停止采集/登录</button>
+    <button type="button" class="btn small" @click="refreshDouyinCollector">刷新状态</button>
+   </div>
+   <p class="tip">运行状态：{{douyinCollector.running?'运行中':'未运行'}} · 登录检测：{{douyinCollector.login_state==='cookie_detected'?'已检测到会话 Cookie':douyinCollector.login_state==='waiting_for_scan'?'等待扫码':douyinCollector.login_state==='login_required'?'需要重新扫码':douyinCollector.login_state||'尚未检测'}}。Cookie 检测不等于平台接口鉴权成功。</p>
+   <p v-if="douyinCollector.collector_error||douyinCollector.last_error||douyinCollector.ui_error" class="tip" style="color:var(--danger,#fb7185)">{{douyinCollector.collector_error||douyinCollector.last_error||douyinCollector.ui_error}}</p>
+   <template v-for="(r,k) in (douyinCollector.rooms||{})" :key="k">
+    <p class="tip">{{k}} · {{r.title||r.live_id}} · WSS 礼物帧 {{r.frames||0}} · 转发 {{r.sent||0}} · 出错 {{r.errors||0}}</p>
+   </template>
+   <div class="channel-login"><button type="button" class="btn small" @click="refreshDouyinRoomInfo">获取主直播间信息</button></div>
+   <p v-if="douyinRoomInfo&&!douyinRoomInfo.error" class="tip">标题：{{douyinRoomInfo.Title||'未返回'}} · 主播：{{douyinRoomInfo.AnchorName||'未返回'}} · 房间 ID：{{douyinRoomInfo.RoomID}} · 状态值：{{douyinRoomInfo.Status}} · 观看数：{{douyinRoomInfo.ViewerCount||'未返回'}}</p>
+   <p v-if="douyinRoomInfo?.error" class="tip">直播间信息暂不可用：{{douyinRoomInfo.error}}</p>
+  </div>
   <p class="tip">抖音礼物：已支持已登录浏览器 WSS 辅助监听（HTTP 弹幕保持原样）。需要安装仓库内 tools/douyin-gift-extension 扩展并配对；
   <a href="/api/douyin/bridge/token" target="_blank" rel="noopener noreferrer">获取本机配对令牌</a> ·
   <a href="/api/douyin/bridge/status" target="_blank" rel="noopener noreferrer">查看桥接状态</a> ·
