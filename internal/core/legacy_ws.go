@@ -152,6 +152,22 @@ func legacyQueuePayload(q []QueueItem) any {
 }
 func legacyMessage(ev Event) any {
 	switch ev.Type {
+	case "gift":
+        // Match the old BiliPDJ WebSocket event shape for Douyin displays.
+        // This is observational data, never a verified purchase entitlement.
+        if payload, ok := ev.Data.(map[string]any); ok {
+            if liveEvent, ok := payload["event"].(live.Event); ok &&
+                liveEvent.Platform == "douyin" && liveEvent.Gift != nil {
+                g := liveEvent.Gift
+                return map[string]any{
+                    "type":"LIVE_GIFT_EVENT", "platform":"douyin",
+                    "uid":liveEvent.UserID, "uname":liveEvent.Username,
+                    "gift":map[string]any{"id":g.GiftID,"name":g.Name,
+                        "count":g.Count,"diamonds":g.Diamonds,"room_id":g.RoomID},
+                    "queue_credit_granted":false, "time":liveEvent.Time,
+                }
+            }
+        }
 	case "queue":
 		if q, ok := ev.Data.([]QueueItem); ok {
 			return legacyQueuePayload(q)
