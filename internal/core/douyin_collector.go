@@ -75,6 +75,10 @@ func (a *App) startDouyinCollector(mode string) error {
  if mode!="login"&&mode!="run"{return errors.New("无效动作")}
  node,err:=exec.LookPath("node")
  if err!=nil{return errors.New("需要安装 Node.js 22+ 并加入 PATH")}
+ versionBytes,versionErr:=exec.Command(node,"--version").Output()
+ if versionErr!=nil{return errors.New("无法获取 Node.js 版本")}
+ major,parseErr:=strconv.Atoi(strings.SplitN(strings.TrimPrefix(strings.TrimSpace(string(versionBytes)),"v"),".",2)[0])
+ if parseErr!=nil||major<22{return fmt.Errorf("抖音无依赖浏览器采集器需要 Node.js 22+（当前 %s）",strings.TrimSpace(string(versionBytes)))}
  script,err:=a.collectorScript()
  if err!=nil{return err}
  directory:=a.collectorDirectory()
