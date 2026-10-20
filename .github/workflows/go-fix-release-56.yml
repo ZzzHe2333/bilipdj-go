@@ -1,0 +1,173 @@
+name: BiliPDJ Go v0.10.7-test Repair Preview Release
+# Issue #56: publish only if complete tests and every architecture build pass.
+on:
+  push:
+    branches:
+      - release/v0.10.7-test
+    paths:
+      - .github/workflows/go-fix-release-56.yml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - id: version
+        shell: bash
+        run: |
+          V=$(tr -d '\r\n' < VERSION)
+          test "$(sed -n 's/^var version = \"\([^\"]*\)\"/\1/p' main.go)" = "$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Reject an already published trial tag
+        shell: bash
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
+            echo "Version tag already exists; increment VERSION instead of overwriting an existing Release"
+            exit 1
+          fi
+      - name: UI regression check
+        run: |
+          node --check web/app.js
+          node --check tools/douyin-gift-collector/collector.mjs
+          grep -q '保存全部配置' web/index.html
+          grep -q 'logInfo.dir' web/index.html
+      - name: Unit tests and static analysis
+        run: go test ./... && go vet ./...
+      - name: Race detector (MCP and concurrent queue activity)
+        run: go test -race ./...
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - {os: windows, arch: amd64}
+          - {os: windows, arch: arm64}
+          - {os: linux, arch: amd64}
+          - {os: linux, arch: arm64}
+          - {os: darwin, arch: amd64}
+          - {os: darwin, arch: arm64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Package native executable and checksum
+        shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          RELEASE_TAG: v${{ needs.test.outputs.version }}
+        run: |
+          mkdir -p dist/package
+          EXT=""; [[ "$GOOS" == windows ]] && EXT=.exe
+          if [[ "$GOOS" == windows ]]; then
+            # The committed ICO sources are Base64-encoded to keep them
+            # writable via the repository integration. Decode before build.
+            base64 --decode assets/bilipdj-go.ico.b64 > assets/bilipdj-go.ico
+            base64 --decode assets/bilipdj-go-tray.ico.b64 > assets/bilipdj-go-tray.ico
+            # Resource objects are scoped to the current Windows architecture.
+            # The other OS builds do not require go-winres or Windows SDKs.
+            GOOS=linux GOARCH=amd64 go run github.com/tc-hib/go-winres@v0.3.3 simply \
+              --arch "$GOARCH" --out rsrc \
+              --manifest gui --icon assets/bilipdj-go.ico \
+              --product-name "BiliPDJ Go" \
+              --file-description "BiliPDJ Go live queue manager"
+          fi
+          LDFLAGS="-s -w -X main.version=${RELEASE_TAG#v}"
+          [[ "$GOOS" == windows ]] && LDFLAGS="$LDFLAGS -H=windowsgui"
+          CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o "dist/package/bilipdj-go${EXT}" .
+          if [[ "$GOOS" == windows ]]; then
+            # A dedicated console-subsystem executable guarantees redirected
+            # stdin/stdout pipes for AI clients using --mcp-stdio. The regular
+            # executable remains GUI-subsystem with no black console.
+            CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${RELEASE_TAG#v}" -o "dist/package/bilipdj-go-mcp.exe" .
+          fi
+          cp README.md LICENSE NOTICE.md dist/package/
+          if [[ "$GOOS" == windows ]]; then
+            cp assets/bilipdj-go.ico assets/bilipdj-go-tray.ico dist/package/
+          fi
+          cp -r third_party docs dist/package/
+          mkdir -p dist/package/tools
+          cp -r tools/douyin-gift-extension dist/package/tools/
+          cp -r tools/douyin-gift-collector dist/package/tools/
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            printf "BiliPDJ-Go MCP PREVIEW BUILD (not a release)\\nPR: #3\\nCommit: %s\\nVersion baseline: %s\\nNo GitHub tag or official Release is created by this workflow run.\\n" "$GITHUB_SHA" "${RELEASE_TAG#v}" > dist/package/PREVIEW_BUILD.txt
+          fi
+          (cd dist/package && zip -q -r "../bilipdj-go-${GOOS}-${GOARCH}.zip" .)
+          (cd dist && sha256sum "bilipdj-go-${GOOS}-${GOARCH}.zip" > "bilipdj-go-${GOOS}-${GOARCH}.zip.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bilipdj-go-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+  release:
+    if: github.ref == 'refs/heads/release/v0.10.6-test'
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {path: dist, merge-multiple: true}
+      - name: Generate updater manifest for proxy-only networks
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.test.outputs.version }}
+        run: |
+          python3 - <<'PYMANIFEST'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('dist')
+          packages = {}
+          for pkg in sorted(root.glob('bilipdj-go-*.zip')):
+              digest = hashlib.sha256(pkg.read_bytes()).hexdigest()
+              checksum_file = root / (pkg.name + '.sha256')
+              assert checksum_file.is_file(), pkg.name
+              assert checksum_file.read_text().split()[0].lower() == digest, pkg.name
+              packages[pkg.name] = {'name': pkg.name, 'size': pkg.stat().st_size, 'sha256': digest}
+          assert len(packages) == 6, 'Expected all six architectures'
+          version = os.environ['RELEASE_VERSION']
+          manifest = {'version': version, 'tag_name': 'v'+version, 'packages': packages}
+          (root / 'update-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+          PYMANIFEST
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.test.outputs.version }}
+          name: BiliPDJ Go v${{ needs.test.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          body: |
+            ## BiliPDJ GO v0.10.7-test：保存故障与持久化日志修复
+            这是修复版 **预发行测试包**，不会替换最新正式版。
+            
+            - 恢复「直播平台与规则」页面顶部及中部的「保存全部配置」按钮；
+              后端持久化后再次读取配置确认已保存。
+            - 记录配置保存校验/写盘失败、API 变更结果、直播连接状态和采集器标准输出；
+              所有诊断日志储存在 Go 用户数据目录的 logs/，默认单文件 10 MiB，保留 14 天。
+            - 优化抖音 Node/Chrome 启动报错及 Windows Node 安装路径检测，
+              Web 「运行日志」页面显示实际日志文件夹位置。
+            - 继续包含 0.10.6-test 的扫码登录、多直播间 WSS 礼物采集、连击解析。
+            - 新增配置保存、Cookie/token 脱敏与日志落盘测试；完成 go test/vet/race 检测。
+            
+            **依赖**：使用抖音后台礼物采集需自行安装 Node.js 22+ 和 Chrome / Edge。
+            第一次登录请在软件的「直播平台与规则 → 抖音」打开扫码窗口。
+            
+            **注意**：抖音接口可能调整；浏览器监听数据不作为实际收益或付费资格。
+            请先备份已有存档，试用中发现问题请在 #56 反馈。
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.zip
+            dist/*.sha256
+            dist/update-manifest.json
