@@ -112,6 +112,11 @@
     <details class="channel-advanced"><summary>高级：手动填写 B站 Cookie</summary><textarea v-model="config.bilibili.cookie" rows="2" :placeholder="cookieConfigured.bilibili?'已保存，留空保留':'手动粘贴 Cookie'"></textarea></details>
   </template>
   <template v-else-if="p.id==='douyin'"><p class="tip">可直接输入数字房间号，或粘贴 live.douyin.com 网址及包含网址的分享文案，自动解析。短链接需先在浏览器展开。</p>
+  <p class="tip">抖音礼物：已支持已登录浏览器 WSS 辅助监听（HTTP 弹幕保持原样）。需要安装仓库内 tools/douyin-gift-extension 扩展并配对；
+  <a href="/api/douyin/bridge/token" target="_blank" rel="noopener noreferrer">获取本机配对令牌</a> ·
+  <a href="/api/douyin/bridge/status" target="_blank" rel="noopener noreferrer">查看桥接状态</a> ·
+  <a href="https://github.com/ZzzHe2333/bilipdj-go/blob/main/docs/DOUYIN_GIFT_BRIDGE.md" target="_blank" rel="noopener noreferrer">使用说明（合并后可用）</a>。
+  浏览器礼物仅供展示和统计，不自动授予排队资格。</p>
     <details class="channel-advanced"><summary>高级：Cookie（通常无需配置）</summary><textarea v-model="config.douyin.cookie" rows="2" :placeholder="cookieConfigured.douyin?'已保存，留空保留':'仅在网页请求登录时需要'"></textarea></details>
   </template>
   <p v-else class="tip">{{p.description}}该平台目前仅支持保存配置，不会尝试连接或显示在线状态。</p>
