@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ type LogEntry struct {
 
 const maxConsoleLogs = 500
 
-var logSecrets = regexp.MustCompile(`(?i)(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|cookie|authorization|auth_token|access_token|refresh_token|token|ticket|qrcode_key)\s*[:=]\s*([^\s;&]+)`)
+var logSecrets = regexp.MustCompile(`(?i)(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|Cookie|Set-Cookie|Authorization|auth_token|access_token|refresh_token|PDJ_DOUYIN_BRIDGE_TOKEN|X-PDJ-Bridge-Token|sessionid_ss|sessionid|sid_tt|ttwid|msToken|a_bogus|csrf_token|token|ticket|qrcode_key)\s*[:=]\s*([^\s;&]+)`)
 
 func sanitizeConsoleLog(s string) string {
 	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "))
@@ -42,6 +43,12 @@ func (a *App) appendLogLocked(level, category, message string) {
 	if len(a.logs) > maxConsoleLogs {
 		a.logs = append([]LogEntry(nil), a.logs[len(a.logs)-maxConsoleLogs:]...)
 	}
+    if a.diagnostic != nil {
+        if err := a.diagnostic.line(level,category,message);err!=nil {
+            // Never recursively call logEvent from this error path.
+            _,_ = os.Stderr.WriteString("BiliPDJ 日志写入失败: "+err.Error()+"\n")
+        }
+    }
 	a.publishLocked(Event{Type: "log", Data: entry})
 }
 
