@@ -129,6 +129,7 @@ type App struct {
 	giftUsed            map[string]bool
 	giftSeen            []string
 	giftLast            *live.Event
+	douyinBridge        *douyinGiftBridge
 	styleSlots          map[string]map[string]any
 	style               map[string]any
 	appearance          map[string]any
@@ -170,6 +171,7 @@ func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
 
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), styleSlots: map[string]map[string]any{}, appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a.douyinBridge = newDouyinGiftBridge()
 	a.updater = update.New(repo, version, dataDir)
 	a.performance = perf.New(dataDir)
 	a.autostart = autostart.New()
@@ -371,6 +373,14 @@ func (a *App) onDanmuGuarded(e live.Event, ctx context.Context, generation uint6
 	a.mu.Lock()
 	defer a.mu.Unlock()
     if ctx!=nil&&(ctx.Err()!=nil||a.listenerGeneration!=generation){return}
+	if e.Kind == "gift" && e.Platform == "douyin" && e.Gift != nil {
+		// Browser-derived gift events are observational only; never mint queue credits.
+		copyEvent := e
+		a.giftLast = &copyEvent
+		a.publishLocked(Event{Type:"gift",Data:map[string]any{"event":e,"credit_granted":false}})
+		a.appendLogLocked("INFO",e.Platform,fmt.Sprintf("[%s] %s 送出 %s x%d（%d钻，浏览器观测）",e.InstanceID,e.Username,e.Gift.Name,e.Gift.Count,e.Gift.Diamonds))
+		return
+	}
 	if e.Kind == "gift" && e.Platform == "bilibili" && e.Gift != nil {
         snapshot,err:=a.liveSnapshotLocked()
         if err!=nil{
@@ -634,6 +644,7 @@ func (a *App) isAdmin(r *http.Request) bool {
 }
 func (a *App) Routes(ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	a.installDouyinBridgeRoutes(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		send(w, 200, map[string]any{"status": "ok", "version": a.version})
 	})
