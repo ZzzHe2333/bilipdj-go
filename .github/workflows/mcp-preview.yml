@@ -88,6 +88,7 @@ jobs:
           cp -r docs third_party dist/package/
           mkdir -p dist/package/tools
           cp -r tools/douyin-gift-extension dist/package/tools/
+          cp -r tools/douyin-gift-collector dist/package/tools/
           printf 'MCP Preview build (NOT A RELEASE)\nSource PR/manual: %s\nCommit: %s\nBase version: %s\n' "$PR_NUMBER" "$PR_SHA" "$BASE_VERSION" > dist/package/PREVIEW_BUILD.txt
           ZIP="bilipdj-go-mcp-preview-${PR_NUMBER}-${GOOS}-${GOARCH}.zip"
           (cd dist/package && zip -q -r "../$ZIP" .)
