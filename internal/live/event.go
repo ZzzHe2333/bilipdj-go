@@ -17,6 +17,9 @@ type Gift struct {
 	GuardBuy bool   `json:"guard_buy,omitempty"`
 	Diamonds int64 `json:"diamonds,omitempty"` // Douyin diamonds; never Bilibili batteries
 	RoomID string `json:"room_id,omitempty"`
+	UnitDiamonds int64 `json:"unit_diamonds,omitempty"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Event struct {
