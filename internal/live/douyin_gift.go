@@ -85,7 +85,7 @@ func ParseDouyinGiftFrame(frame []byte) ([]DouyinGiftUpdate, error) {
     return updates, err
 }
 
-var douyinGiftDescriptionCount = regexp.MustCompile(`送给主播\\s*(\\d+)\\s*个`)
+var douyinGiftDescriptionCount = regexp.MustCompile(`送给主播\s*(\d+)\s*个`)
 
 func parseDouyinGiftPayload(raw []byte) (DouyinGiftUpdate, error) {
     g := DouyinGiftUpdate{Count: 1}
