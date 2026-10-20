@@ -165,6 +165,24 @@ func (a *App) installDouyinCollectorRoutes(mux *http.ServeMux) {
   }
   a.mu.RUnlock()
   if !found{send(w,404,map[string]string{"error":"enabled Douyin instance not found"});return}
+  // Prefer fresh metadata fetched *inside* the authenticated browser;
+  // the independent Go HTTP client may not possess that Chrome profile cookie.
+  state:=a.douyinCollectorState()
+  if state["running"]==true {
+   if rooms,ok:=state["rooms"].(map[string]any);ok {
+    if roomState,ok:=rooms[instance].(map[string]any);ok {
+     if info,ok:=roomState["room_info"].(map[string]any);ok&&info["available"]==true {
+      send(w,200,map[string]any{
+       "WebRID":roomState["live_id"],"RoomID":info["room_id"],
+       "Title":info["title"],"Status":info["status"],
+       "ViewerCount":info["viewers"],"AnchorName":info["anchor"],
+       "AnchorID":info["anchor_id"],"source":"browser_session",
+      })
+      return
+     }
+    }
+   }
+  }
   ctx,cancel:=context.WithTimeout(r.Context(),12*time.Second)
   defer cancel()
   info,err:=(live.Douyin{}).InspectRoom(ctx,pc.Room,pc.Cookie)
