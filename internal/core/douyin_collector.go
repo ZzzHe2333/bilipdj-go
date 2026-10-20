@@ -72,7 +72,7 @@ func (a *App) collectorRooms() ([]string,error) {
  return rooms,nil
 }
 func (a *App) startDouyinCollector(mode string) error {
- if mode!="login"&&mode!="run"{return errors.New("无效动作")}
+ if mode!="login"&&mode!="run"&&mode!="check"{return errors.New("无效动作")}
  node,err:=exec.LookPath("node")
  if err!=nil{return errors.New("需要安装 Node.js 22+ 并加入 PATH")}
  versionBytes,versionErr:=exec.Command(node,"--version").Output()
@@ -99,7 +99,7 @@ func (a *App) startDouyinCollector(mode string) error {
  args:=[]string{script,"--profile",filepath.Join(directory,"profile"),
   "--status",filepath.Join(directory,"status.json"),"--stop-file",stopFile,
   "--debug-port",strconv.Itoa(port),"--go-port",strconv.Itoa(a.douyinCollectorPort)}
- if mode=="login"{args=append(args,"--login")}else{args=append(args,"--run","--rooms",strings.Join(rooms,","))}
+ if mode=="login"{args=append(args,"--login")}else if mode=="check"{args=append(args,"--check-login")}else{args=append(args,"--run","--rooms",strings.Join(rooms,","))}
  cmd:=exec.Command(node,args...)
  cmd.Dir=filepath.Dir(script)
  cmd.Env=append(os.Environ(),"PDJ_DOUYIN_BRIDGE_TOKEN="+a.douyinBridge.token)
@@ -187,9 +187,10 @@ func (a *App) installDouyinCollectorRoutes(mux *http.ServeMux) {
   var err error
   switch req["action"] {
   case "login":err=a.startDouyinCollector("login")
+  case "check":err=a.startDouyinCollector("check")
   case "start":err=a.startDouyinCollector("run")
   case "stop":err=a.stopDouyinCollector()
-  default:send(w,400,map[string]string{"error":"action must be login/start/stop"});return
+  default:send(w,400,map[string]string{"error":"action must be login/check/start/stop"});return
   }
   if err!=nil{send(w,409,map[string]string{"error":err.Error()});return}
   send(w,200,a.douyinCollectorState())
