@@ -142,7 +142,7 @@
      </table>
     </div>
    </div>
-   <div class="channel-login"><button type="button" class="btn small" @click="refreshDouyinRoomInfo">获取主直播间信息</button></div>
+   <div class="channel-login"><label>查询房间<select v-model="douyinInfoInstance"><option value="douyin">主抖音房间</option><option v-for="x in (config.listeners||[]).filter(x=>x.platform==='douyin'&&x.enabled)" :key="x.id" :value="x.id">{{x.id}} · {{x.room}}</option></select></label><button type="button" class="btn small" @click="refreshDouyinRoomInfo">获取房间信息</button></div>
    <p v-if="douyinRoomInfo&&!douyinRoomInfo.error" class="tip">标题：{{douyinRoomInfo.Title||'未返回'}} · 主播：{{douyinRoomInfo.AnchorName||'未返回'}} · 房间 ID：{{douyinRoomInfo.RoomID}} · 状态值：{{douyinRoomInfo.Status}} · 观看数：{{douyinRoomInfo.ViewerCount||'未返回'}}</p>
    <p v-if="douyinRoomInfo?.error" class="tip">直播间信息暂不可用：{{douyinRoomInfo.error}}</p>
   </div>
