@@ -14,6 +14,7 @@ function arg(key,otherwise='') {
   return i>=0 && argv[i+1] && !argv[i+1].startsWith('--') ? argv[i+1] : otherwise;
 }
 const loginMode=argv.includes('--login');
+const checkMode=argv.includes('--check-login');
 const profile=path.resolve(arg('profile',path.join(os.homedir(),'.bilipdj-douyin')));
 const statusFile=path.resolve(arg('status',path.join(profile,'..','douyin-collector-status.json')));
 const stopFile=path.resolve(arg('stop-file',path.join(profile,'..','douyin-collector-stop')));
@@ -30,11 +31,11 @@ const rooms=arg('rooms','').split(',').filter(Boolean).map(s=>{
 });
 if(!Number.isInteger(debuggerPort)||debuggerPort<1024||debuggerPort>65535)throw new Error('bad debugger port');
 if(!Number.isInteger(port)||port<1||port>65535)throw new Error('bad Go port');
-if(!loginMode && (!rooms.length || !token || token.length<20))throw new Error('rooms and secure Go pairing token required');
+if(!loginMode && !checkMode && (!rooms.length || !token || token.length<20))throw new Error('rooms and secure Go pairing token required');
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let browser=null, cdp=null, closing=false;
-const state={mode:loginMode?'login':'collector',login_state:'unknown',running:true,started_at:new Date().toISOString(),rooms:{},last_error:''};
+const state={mode:loginMode?'login':checkMode?'check':'collector',login_state:'unknown',running:true,started_at:new Date().toISOString(),rooms:{},last_error:''};
 function report(partial={}) {
   Object.assign(state,partial);
   state.updated_at=new Date().toISOString();
@@ -271,6 +272,14 @@ class Room {
       browser_page_open:!!this.sessionId};
   }
 }
+async function checkLoginOnly(){
+  await bootChrome(true);
+  cdp=await connectCDP();
+  const authenticated=await getLoginStatus();
+  report({login_state:authenticated?'cookie_detected':'login_required',
+    logged_in:authenticated,checked_at:new Date().toISOString()});
+  await stop('login_checked');
+}
 async function collector(){
   await bootChrome(true);
   cdp=await connectCDP();
@@ -304,7 +313,7 @@ async function collector(){
 }
 async function main(){
   report();
-  try{if(loginMode)await logIn();else await collector();}
+  try{if(loginMode)await logIn();else if(checkMode)await checkLoginOnly();else await collector();}
   catch(e){logError(e);await stop('error');process.exitCode=1;}
 }
 main();
