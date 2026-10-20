@@ -130,6 +130,8 @@ type App struct {
 	giftSeen            []string
 	giftLast            *live.Event
 	douyinBridge        *douyinGiftBridge
+	douyinCollector     *douyinCollectorProcess
+	douyinCollectorPort int
 	styleSlots          map[string]map[string]any
 	style               map[string]any
 	appearance          map[string]any
@@ -172,6 +174,8 @@ func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), styleSlots: map[string]map[string]any{}, appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
 	a.douyinBridge = newDouyinGiftBridge()
+	a.douyinCollector = newDouyinCollectorProcess()
+	a.douyinCollectorPort = 9816
 	a.updater = update.New(repo, version, dataDir)
 	a.performance = perf.New(dataDir)
 	a.autostart = autostart.New()
@@ -503,6 +507,7 @@ func (a *App) publishInstanceStatus(s live.Status,generation uint64,ctx context.
  a.publishLocked(Event{Type:"status",Data:s})
 }
 func (a *App) Stop() {
+	a.shutdownDouyinCollector()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, stop := range a.workers {
@@ -645,6 +650,7 @@ func (a *App) isAdmin(r *http.Request) bool {
 func (a *App) Routes(ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	a.installDouyinBridgeRoutes(mux)
+	a.installDouyinCollectorRoutes(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		send(w, 200, map[string]any{"status": "ok", "version": a.version})
 	})
