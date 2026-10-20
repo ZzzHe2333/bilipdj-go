@@ -102,6 +102,7 @@ func (a *App) startDouyinCollector(mode string) error {
  if mode=="login"{args=append(args,"--login")}else if mode=="check"{args=append(args,"--check-login")}else{args=append(args,"--run","--rooms",strings.Join(rooms,","))}
  cmd:=exec.Command(node,args...)
  cmd.Dir=filepath.Dir(script)
+ setDouyinNodeHidden(cmd)
  cmd.Env=append(os.Environ(),"PDJ_DOUYIN_BRIDGE_TOKEN="+a.douyinBridge.token)
  // The child writes a sanitized health report; secrets never enter ordinary logs.
  cmd.Stdout=nil;cmd.Stderr=nil
