@@ -213,7 +213,7 @@ async function logIn(){
 
 const hookSource=fs.readFileSync(path.join(root,'hook.js'),'utf8');
 class Room {
-  constructor(id,instance){this.id=id;this.instance=instance;this.frames=0;this.sent=0;this.errors=0;this.targetId='';this.sessionId='';this.lastIM=0;this.lastReload=Date.now();this.title='';}
+  constructor(id,instance){this.id=id;this.instance=instance;this.frames=0;this.sent=0;this.errors=0;this.targetId='';this.sessionId='';this.lastIM=0;this.lastReload=Date.now();this.title='';this.info={};this.lastInfoAt=0;}
   async open(){
     const t=await cdp.send('Target.createTarget',{url:'about:blank'});
     this.targetId=t.targetId;
@@ -227,6 +227,24 @@ class Room {
   }
   async close(){if(this.targetId)try{await cdp.send('Target.closeTarget',{targetId:this.targetId})}catch{};this.targetId='';this.sessionId='';}
   async reload(){await this.close();await this.open();}
+  async inspect() {
+    this.lastInfoAt=Date.now();
+    const expression = '(async function(){try{' +
+      'const raw=document.documentElement.innerHTML;' +
+      'const r=(raw.match(/"roomId":"(\\d+)"/)||raw.match(/\\\\"roomId\\\\":\\\\"(\\d+)\\\\"/));' +
+      'const roomId=r&&r[1];if(!roomId)return JSON.stringify({available:false,reason:"roomId missing"});' +
+      'const qs=new URLSearchParams({aid:"6383",app_name:"douyin_web",live_id:"1",device_platform:"web",language:"zh-CN",enter_from:"web_share_link",cookie_enabled:"true",screen_width:"1920",screen_height:"1080",browser_language:"zh-CN",browser_platform:"Win32",browser_name:"Chrome",browser_version:"155.0.0.0",os_name:"Windows",os_version:"10",webcast_sdk_version:"2450",room_id:roomId,web_rid:location.pathname.split("/").filter(Boolean)[0]||""});' +
+      'const response=await fetch("/webcast/room/web/enter/?"+qs.toString(),{credentials:"include"});' +
+      'if(!response.ok)return JSON.stringify({available:false,reason:"HTTP "+response.status});' +
+      'const parsed=await response.json();const room=parsed&&parsed.data&&parsed.data.data&&parsed.data.data[0];' +
+      'if(!room)return JSON.stringify({available:false,reason:"empty room"});' +
+      'return JSON.stringify({available:true,room_id:String(roomId),title:String(room.title||"").slice(0,120),status:room.status,viewers:String(room.user_count_str||""),anchor:String((room.owner&&room.owner.nickname)||"").slice(0,80),anchor_id:String((room.owner&&room.owner.id_str)||"")});' +
+      '}catch(e){return JSON.stringify({available:false,reason:String(e).slice(0,100)})}})()';
+    try {
+      const result=await cdp.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},this.sessionId,20000);
+      this.info=JSON.parse(result?.result?.value||'{}');
+    } catch(e){this.info={available:false,reason:e.message.slice(0,100)};}
+  }
   async tick(){
     if(!this.sessionId){await this.open();return;}
     const r=await cdp.send('Runtime.evaluate',{
@@ -237,6 +255,7 @@ class Room {
     if(!raw)return;
     const result=JSON.parse(raw);
     this.title=String(result.title||'').slice(0,120);
+    if(Date.now()-this.lastInfoAt>60000)await this.inspect();
     if(!result.hook && Date.now()-this.lastReload>30000)await this.reload();
     const data=result.data||{};
     if(data.lastIM)this.lastIM=data.lastIM;
@@ -269,7 +288,7 @@ class Room {
   snapshot(){
     return {live_id:this.id,instance_id:this.instance,title:this.title,frames:this.frames,
       sent:this.sent,errors:this.errors,last_im_at:this.lastIM?new Date(this.lastIM).toISOString():null,
-      browser_page_open:!!this.sessionId};
+      browser_page_open:!!this.sessionId,room_info:this.info};
   }
 }
 async function checkLoginOnly(){
