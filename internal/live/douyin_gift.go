@@ -67,7 +67,10 @@ func ParseDouyinGiftFrame(frame []byte) ([]DouyinGiftUpdate, error) {
         if method != "WebcastGiftMessage" { return nil }
         update, err := parseDouyinGiftPayload(body)
         if err != nil { return err }
-        if update.UserID != "" && update.GiftID > 0 && update.RoomID != "" && update.GiftName != "" {
+        if update.UserID != "" && update.GiftID > 0 && update.RoomID != "" &&
+            update.GiftName != "" && len(update.Username) <= 512 &&
+            update.Count >= 1 && update.Count <= 10000000 &&
+            update.UnitDiamonds >= 0 && update.UnitDiamonds <= 1000000000 {
             updates = append(updates, update)
         }
         if len(updates) > 1000 { return errors.New("too many gift updates per frame") }
