@@ -117,6 +117,7 @@
    <p class="tip">需要本机 Node.js 22+ 与 Chrome/Edge。首次扫码使用独立浏览器资料目录；登录完成后，后台浏览器自动复用登录态、监听全部已保存启用的抖音房间。不会把 Cookie 复制到 Go 配置或前端。</p>
    <div class="channel-login">
     <button type="button" class="btn primary small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('login')">打开抖音扫码登录</button>
+    <button type="button" class="btn small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('check')">检测登录状态</button>
     <button type="button" class="btn small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('start')">启动后台礼物采集</button>
     <button type="button" class="btn small" :disabled="douyinCollectorBusy||!douyinCollector.running" @click="controlDouyinCollector('stop')">停止采集/登录</button>
     <button type="button" class="btn small" @click="refreshDouyinCollector">刷新状态</button>
