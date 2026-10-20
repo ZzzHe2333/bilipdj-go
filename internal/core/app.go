@@ -674,6 +674,16 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
         send(w,200,map[string]any{"dir":a.DiagnosticDirectory(),"rotation":"10 MiB per file, 14 days","file_name":"bilipdj-YYYY-MM-DD.log"})
     })
+    mux.HandleFunc("POST /api/logs/client",func(w http.ResponseWriter,r *http.Request){
+        if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
+        var payload struct{Message string `json:"message"`}
+        if err:=decodeLimit(r,&payload,2048);err!=nil{
+            send(w,400,map[string]string{"error":"invalid diagnostic payload"});return
+        }
+        if strings.TrimSpace(payload.Message)==""{send(w,400,map[string]string{"error":"empty message"});return}
+        a.logEvent("ERROR","web",payload.Message)
+        send(w,200,map[string]any{"status":"ok"})
+    })
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
