@@ -7,6 +7,8 @@ import (
     "fmt"
     "io"
     "strings"
+    "regexp"
+    "strconv"
 )
 
 // DouyinGiftUpdate is one cumulative update from a live WebcastGiftMessage.
@@ -19,6 +21,10 @@ type DouyinGiftUpdate struct {
     Username string
     GiftID int64
     GiftName string
+    GiftDescription string
+    AvatarURL string
+    GroupCount int
+    ComboCount int
     UnitDiamonds int64
     Count int
     GroupID string
@@ -79,14 +85,20 @@ func ParseDouyinGiftFrame(frame []byte) ([]DouyinGiftUpdate, error) {
     return updates, err
 }
 
+var douyinGiftDescriptionCount = regexp.MustCompile(`送给主播\\s*(\\d+)\\s*个`)
+
 func parseDouyinGiftPayload(raw []byte) (DouyinGiftUpdate, error) {
     g := DouyinGiftUpdate{Count: 1}
+    hasRepeatCount := false
+    var description string
     var common, user, gift []byte
     err := pbWalk(raw, func(f pbField) error {
         switch f.N {
         case 1: if f.Wire == 2 { common = f.Bytes }
         case 2: if f.Wire == 0 { g.GiftID = int64(f.Value) }
-        case 5: if f.Wire == 0 && f.Value > 0 && f.Value < 100000000 { g.Count = int(f.Value) }
+        case 4: if f.Wire == 0 && f.Value <= 10000000 { g.GroupCount = int(f.Value) }
+        case 5: if f.Wire == 0 && f.Value > 0 && f.Value < 100000000 { g.Count = int(f.Value); hasRepeatCount = true }
+        case 6: if f.Wire == 0 && f.Value <= 10000000 { g.ComboCount = int(f.Value) }
         case 7: if f.Wire == 2 { user = f.Bytes }
         case 9: if f.Wire == 0 { g.RepeatEnd = f.Value == 1 }
         case 10: if f.Wire == 0 { g.GroupID = fmt.Sprint(f.Value) }
@@ -103,6 +115,7 @@ func parseDouyinGiftPayload(raw []byte) (DouyinGiftUpdate, error) {
             g.CreatedAt = int64(f.Value)
             if g.CreatedAt < 100000000000 { g.CreatedAt *= 1000 }
         }
+        case 7: if f.Wire == 2 { description = string(f.Bytes) }
         }
         return nil
     })
@@ -110,16 +123,32 @@ func parseDouyinGiftPayload(raw []byte) (DouyinGiftUpdate, error) {
     err = pbWalk(user, func(f pbField) error {
         if f.N == 1 && f.Wire == 0 { g.UserID = fmt.Sprint(f.Value) }
         if f.N == 3 && f.Wire == 2 { g.Username = strings.TrimSpace(string(f.Bytes)) }
+        if f.N == 9 && f.Wire == 2 {
+            // User avatar list usually contains repeated direct URL strings.
+            _ = pbWalk(f.Bytes, func(a pbField) error {
+                if a.Wire == 2 && len(a.Bytes) <= 2048 && g.AvatarURL == "" {
+                    s := string(a.Bytes)
+                    if strings.HasPrefix(s,"https://") { g.AvatarURL=s }
+                }
+                return nil
+            })
+        }
         return nil
     })
     if err != nil { return g, err }
     err = pbWalk(gift, func(f pbField) error {
         switch f.N {
+        case 2: if f.Wire == 2 { g.GiftDescription = strings.TrimSpace(string(f.Bytes)) }
         case 5: if f.Wire == 0 && g.GiftID == 0 { g.GiftID = int64(f.Value) }
         case 12: if f.Wire == 0 { g.UnitDiamonds = int64(f.Value) }
         case 16: if f.Wire == 2 { g.GiftName = strings.TrimSpace(string(f.Bytes)) }
         }
         return nil
     })
+    if !hasRepeatCount && description != "" {
+        if matched := douyinGiftDescriptionCount.FindStringSubmatch(description); len(matched) == 2 {
+            if count,convErr := strconv.Atoi(matched[1]);convErr == nil && count > 0 && count < 100000000 {g.Count=count}
+        }
+    }
     return g, err
 }
