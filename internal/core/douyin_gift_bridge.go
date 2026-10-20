@@ -5,7 +5,6 @@ import (
     "crypto/subtle"
     "encoding/base64"
     "encoding/json"
-    "errors"
     "fmt"
     "io"
     "net"
@@ -150,6 +149,11 @@ func (a *App) receiveDouyinGiftFrame(w http.ResponseWriter, r *http.Request) {
         if binding.roomID == "" { binding = douyinBinding{req.LiveID, g.RoomID} }
     }
     b.bindings[req.InstanceID] = binding
+    if len(b.closed) > 2048 {
+        for key, completed := range b.closed {
+            if time.Since(completed.finished) > 60*time.Second { delete(b.closed, key) }
+        }
+    }
     ready := make([]live.Event, 0)
     for _, g := range updates {
         if g.MessageID == "" { continue }
@@ -165,8 +169,11 @@ func (a *App) receiveDouyinGiftFrame(w http.ResponseWriter, r *http.Request) {
         if ended, exists := b.closed[key]; exists {
             if time.Since(ended.finished) > 60*time.Second {
                 delete(b.closed, key)
-            } else if g.CreatedAt <= ended.createdAt ||
-                (g.Count <= ended.count && g.CreatedAt < ended.createdAt+2000) {
+            } else if !(g.RepeatEnd && g.Count == 1) &&
+                (g.CreatedAt <= ended.createdAt ||
+                    (g.Count <= ended.count && g.CreatedAt < ended.createdAt+2000)) {
+                // Distinct single-gift messages can arrive in the same second;
+                // each complete one-count event is not a duplicate combo.
                 continue
             }
         }
@@ -232,6 +239,3 @@ func (a *App) emitDouyinBridgeGift(event live.Event, liveID string) {
     a.onDanmuGuarded(event, nil, 0)
 }
 
-// compile-time guard for intentional read-only bridging; this handler does not
-// process user-supplied queue actions or treat incoming events as payment proof.
-var _ = errors.New
