@@ -1,6 +1,7 @@
 package core
 
 import (
+ "context"
  "encoding/json"
  "errors"
  "fmt"
@@ -145,6 +146,31 @@ func (a *App) douyinCollectorState() map[string]any {
  return payload
 }
 func (a *App) installDouyinCollectorRoutes(mux *http.ServeMux) {
+ mux.HandleFunc("GET /api/douyin/room/info",func(w http.ResponseWriter,r *http.Request){
+  if !douyinIsLoopback(r)||!a.isAdmin(r){send(w,403,map[string]string{"error":"local admin only"});return}
+  instance:=r.URL.Query().Get("instance_id")
+  a.mu.RLock()
+  var pc ListenerConfig
+  found:=false
+  for _,item:=range configuredListeners(a.config){
+   if item.Platform=="douyin"&&item.ID==instance&&item.Enabled{
+    pc=item
+    found=true
+    break
+   }
+  }
+  a.mu.RUnlock()
+  if !found{send(w,404,map[string]string{"error":"enabled Douyin instance not found"});return}
+  ctx,cancel:=context.WithTimeout(r.Context(),12*time.Second)
+  defer cancel()
+  info,err:=(live.Douyin{}).InspectRoom(ctx,pc.Room,pc.Cookie)
+  if err!=nil{
+   send(w,502,map[string]any{"error":"抖音房间信息读取失败："+err.Error()})
+   return
+  }
+  w.Header().Set("Cache-Control","no-store")
+  send(w,200,info)
+ })
  mux.HandleFunc("GET /api/douyin/collector/status",func(w http.ResponseWriter,r *http.Request){
   if !douyinIsLoopback(r)||!a.isAdmin(r){send(w,403,map[string]string{"error":"local admin only"});return}
   w.Header().Set("Cache-Control","no-store")
