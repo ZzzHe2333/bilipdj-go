@@ -129,6 +129,10 @@ type App struct {
 	giftUsed            map[string]bool
 	giftSeen            []string
 	giftLast            *live.Event
+	douyinRecent        []live.Event
+	douyinBridge        *douyinGiftBridge
+	douyinCollector     *douyinCollectorProcess
+	douyinCollectorPort int
 	styleSlots          map[string]map[string]any
 	style               map[string]any
 	appearance          map[string]any
@@ -141,6 +145,7 @@ type App struct {
 	listenerGeneration  uint64
 	listenerFactory     func(string) live.Source
 	dataPath            string
+	diagnostic          *diagnosticFiles
 	queuePath           string
 	queueExternal       bool
 	version             string
@@ -170,6 +175,10 @@ func (a *App) SetAutostartController(c autostart.Controller) { a.autostart = c }
 
 func New(dataDir, version, repo string) *App {
 	a := &App{config: defaultConfig(), style: defaultStyle(), styleSlots: map[string]map[string]any{}, appearance: defaultAppearance(), queue: []QueueItem{}, slots: map[string][]QueueItem{}, dailyCounts: map[string]int{}, giftCredits: map[string]int{}, giftUsed: map[string]bool{}, messages: []live.Event{}, statuses: map[string]live.Status{}, subscribers: map[chan Event]struct{}{}, workers: map[string]context.CancelFunc{}, dataPath: filepath.Join(dataDir, "state.json"), version: version, repo: repo}
+	a.diagnostic = newDiagnosticFiles(dataDir)
+	a.douyinBridge = newDouyinGiftBridge()
+	a.douyinCollector = newDouyinCollectorProcess()
+	a.douyinCollectorPort = 9816
 	a.updater = update.New(repo, version, dataDir)
 	a.performance = perf.New(dataDir)
 	a.autostart = autostart.New()
@@ -371,6 +380,16 @@ func (a *App) onDanmuGuarded(e live.Event, ctx context.Context, generation uint6
 	a.mu.Lock()
 	defer a.mu.Unlock()
     if ctx!=nil&&(ctx.Err()!=nil||a.listenerGeneration!=generation){return}
+	if e.Kind == "gift" && e.Platform == "douyin" && e.Gift != nil {
+		// Browser-derived gift events are observational only; never mint queue credits.
+		copyEvent := e
+		a.giftLast = &copyEvent
+        a.douyinRecent = append(a.douyinRecent, e)
+        if len(a.douyinRecent) > 100 { a.douyinRecent = append([]live.Event{}, a.douyinRecent[len(a.douyinRecent)-100:]...) }
+		a.publishLocked(Event{Type:"gift",Data:map[string]any{"event":e,"credit_granted":false}})
+		a.appendLogLocked("INFO",e.Platform,fmt.Sprintf("[%s] %s 送出 %s x%d（%d钻，浏览器观测）",e.InstanceID,e.Username,e.Gift.Name,e.Gift.Count,e.Gift.Diamonds))
+		return
+	}
 	if e.Kind == "gift" && e.Platform == "bilibili" && e.Gift != nil {
         snapshot,err:=a.liveSnapshotLocked()
         if err!=nil{
@@ -493,6 +512,8 @@ func (a *App) publishInstanceStatus(s live.Status,generation uint64,ctx context.
  a.publishLocked(Event{Type:"status",Data:s})
 }
 func (a *App) Stop() {
+	a.shutdownDouyinCollector()
+	a.logEvent("INFO","system","BiliPDJ Go 正在退出")
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, stop := range a.workers {
@@ -634,6 +655,8 @@ func (a *App) isAdmin(r *http.Request) bool {
 }
 func (a *App) Routes(ui http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	a.installDouyinBridgeRoutes(mux)
+	a.installDouyinCollectorRoutes(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		send(w, 200, map[string]any{"status": "ok", "version": a.version})
 	})
@@ -647,6 +670,20 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		send(w, 200, a.performance.Sample())
 	})
+	mux.HandleFunc("GET /api/logs/info", func(w http.ResponseWriter, r *http.Request) {
+        if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
+        send(w,200,map[string]any{"dir":a.DiagnosticDirectory(),"rotation":"10 MiB per file, 14 days","file_name":"bilipdj-YYYY-MM-DD.log"})
+    })
+    mux.HandleFunc("POST /api/logs/client",func(w http.ResponseWriter,r *http.Request){
+        if !a.isAdmin(r){send(w,403,map[string]string{"error":"forbidden"});return}
+        var payload struct{Message string `json:"message"`}
+        if err:=decodeLimit(r,&payload,2048);err!=nil{
+            send(w,400,map[string]string{"error":"invalid diagnostic payload"});return
+        }
+        if strings.TrimSpace(payload.Message)==""{send(w,400,map[string]string{"error":"empty message"});return}
+        a.logEvent("ERROR","web",payload.Message)
+        send(w,200,map[string]any{"status":"ok"})
+    })
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdmin(r) {
 			send(w, 403, map[string]string{"error": "forbidden"})
@@ -833,6 +870,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		}
 		var cfg Config
 		if e := decodeLimit(r, &cfg, 512<<10); e != nil {
+            a.logEvent("ERROR","system","配置保存失败：JSON 解析错误 "+e.Error())
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
@@ -852,6 +890,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 		a.mu.Unlock()
 		cfg, e := cleanConfig(cfg)
 		if e != nil {
+            a.logEvent("ERROR","system","配置保存校验失败："+e.Error())
 			send(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
@@ -868,6 +907,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         mergeCurrentCredentials(&cfg,a.config,suppliedCookies)
         if err:=validateRoomListeners(&cfg);err!=nil{
             a.mu.Unlock()
+            a.logEvent("ERROR","system","配置保存冲突："+err.Error())
             send(w,409,map[string]string{"error":"直播间或 Cookie 已被其他页面修改："+err.Error()})
             return
         }
@@ -879,6 +919,7 @@ func (a *App) Routes(ui http.Handler) http.Handler {
         if e!=nil {
             a.config=before
             a.mu.Unlock()
+            a.logEvent("ERROR","system","配置写盘失败："+e.Error())
 			send(w, 500, map[string]string{"error": e.Error()})
 			return
         }
@@ -1162,6 +1203,21 @@ func (a *App) Routes(ui http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+        if r.Method==http.MethodPost||r.Method==http.MethodPut||r.Method==http.MethodPatch||r.Method==http.MethodDelete {
+            // Diagnostic logging never captures the request body, cookies,
+            // token headers or URL query values. Exclude high-frequency
+            // gift frames and the browser diagnostic endpoint itself.
+            writer:=&statusLogWriter{ResponseWriter:w}
+            mux.ServeHTTP(writer,r)
+            if r.URL.Path!="/api/douyin/bridge/frame"&&r.URL.Path!="/api/logs/client" {
+                if writer.status>=400 {
+                    a.logEvent("ERROR","http",fmt.Sprintf("%s %s => HTTP %d",r.Method,r.URL.Path,writer.status))
+                }else if writer.status>=200&&writer.status<300{
+                    a.logEvent("INFO","http",fmt.Sprintf("%s %s => HTTP %d",r.Method,r.URL.Path,writer.status))
+                }
+            }
+            return
+        }
 		mux.ServeHTTP(w, r)
 	})
 }

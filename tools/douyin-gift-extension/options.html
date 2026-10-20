@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>BiliPDJ-GO 抖音桥接</title>
+<style>body{font:15px system-ui,sans-serif;max-width:600px;margin:32px auto;line-height:1.7}label{display:block;margin:12px 0}input{width:100%;padding:9px;box-sizing:border-box}button{padding:9px 18px}p{color:#666}</style></head><body>
+<h2>BiliPDJ-GO 抖音礼物监听桥接</h2>
+<p>在 BiliPDJ-GO 本机打开 <code>/api/douyin/bridge/token</code> 获取本次启动的配对令牌。请勿将令牌放进抖音页面控制台。</p>
+<label>本地监听端口<input id="port" type="number" min="1" max="65535" value="9816"></label>
+<label>监听实例 ID<input id="instance" value="douyin"></label>
+<label>配对令牌<input id="token" type="password" autocomplete="off"></label>
+<label>多房间映射（每行：直播网页 ID=Go 实例 ID，留空使用默认实例）<textarea id="roomMap" rows="4" style="width:100%;box-sizing:border-box" placeholder="980468525827=douyin\n730127423738=douyin-mroom001"></textarea></label>
+<button id="save">保存</button> <span id="status" role="status"></span>
+<p>在 Go 控制台启用对应抖音直播间，然后打开相同房间的已登录抖音网页。只接收礼物事件，不会修改或发送抖音消息。浏览器礼物事件不自动授予付费排队资格。</p>
+<script src="options.js"></script></body></html>

@@ -1,0 +1,59 @@
+name: BiliPDJ-Go Issue 56 Fix Validation Round 3
+on:
+  push:
+    branches: [fix/go-logs-save-56]
+    paths:
+      - .github/workflows/go-fix-ci-56.yml
+permissions:
+  contents: read
+  issues: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Check JavaScript and required config controls
+        id: js
+        shell: bash
+        run: |
+          node --check web/app.js
+          node --check tools/douyin-gift-collector/collector.mjs
+          grep -q '保存全部配置' web/index.html
+          grep -q 'logInfo.dir' web/index.html
+      - name: Go unit tests, vet, race, and cross compilation
+        id: checks
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            go test ./... &&
+            go vet ./... &&
+            go test -race ./... &&
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/bilipdj-go-linux . &&
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /tmp/bilipdj-go.exe . &&
+            CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o /tmp/bilipdj-go-macos .
+          } 2>&1 | tee /tmp/bilipdj-issue-56-validation.log
+      - name: Record result in Issue 56
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CHECK_RESULT: ${{ steps.checks.outcome }}
+          JS_RESULT: ${{ steps.js.outcome }}
+        with:
+          script: |
+            const fs=require('fs');
+            const passed=process.env.CHECK_RESULT==='success' && process.env.JS_RESULT==='success';
+            const logs=fs.existsSync('/tmp/bilipdj-issue-56-validation.log')
+              ? fs.readFileSync('/tmp/bilipdj-issue-56-validation.log','utf8').slice(-4000)
+              : 'Go checks did not start.';
+            const status=passed?'通过':'失败';
+            const body='## Issue #56 修复 CI：'+status+'\n\n'
+              +'提交：'+context.sha+'\n'
+              +'JS/控件：'+process.env.JS_RESULT+'\n'
+              +'Go tests/vet/race/build：'+process.env.CHECK_RESULT+'\n\n'
+              +(passed?'全部检查通过。':'错误摘要（仅 CI 输出尾部，注意不要粘贴私有运行日志）：\n\n```\n'+logs+'\n```');
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:56,body});

@@ -1,5 +1,8 @@
 <div align="center">
 
+> **抖音礼物（开发分支）**：在「直播平台与规则 → 抖音」可通过本机 Chrome/Edge 可见窗口扫码登录，然后启动后台浏览器（需 Node.js 22+）监听礼物。复用 Go 的多房间、日志与 SSE/WS；不需要额外的 8787 看板，也不会将抖音 Cookie 展示在网页。使用说明见 [docs/DOUYIN_GIFT_BRIDGE.md](./docs/DOUYIN_GIFT_BRIDGE.md)。这一功能尚未经过真实已登录直播间的验收。
+
+
 <img src="./web/bilipdj-go.svg" alt="BiliPDJ-Go 项目图标" width="104" height="104">
 
 # 🎬 BiliPDJ-Go · 轻量直播排队姬

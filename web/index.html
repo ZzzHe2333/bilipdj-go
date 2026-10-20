@@ -20,6 +20,10 @@
    <div class="title-actions"><span class="pill" :class="streamReady?'active':'inactive'">{{streamReady?'● 实时连接中':'○ 正在重连'}}</span><button class="btn" @click="refreshLogs">刷新日志</button></div>
   </div>
   <div class="platform-grid log-status-grid"><article v-for="p in [...monitorPlatforms,...extraMonitorPlatforms]" :key="p.instanceId||p.id" class="panel platform"><div class="platform-head"><div><span class="platform-icon" :class="p.id">{{p.id==='bilibili'?'B':'抖'}}</span><strong>{{p.name}}</strong></div><span class="pill" :class="statuses[p.instanceId||p.id]?.connected?'active':'inactive'">{{statuses[p.instanceId||p.id]?.connected?'已连接':'未连接'}}</span></div><p class="platform-room">{{p.room||config[p.id]?.room || '尚未设置直播间'}}</p><p class="platform-help">{{statuses[p.instanceId||p.id]?.message || '等待连接状态'}}</p></article></div>
+  <section class="panel log-footer-panel"><strong>持久化故障日志</strong>
+   <p class="tip">日志自动写入 Go 用户数据目录的 logs 文件夹，保存启动、配置提交和抖音采集器异常；默认单文件 10 MiB、保留 14 天。Cookie、令牌将自动隐藏。</p>
+   <div class="channel-head-actions"><code style="word-break:break-all">{{logInfo.dir||'正在读取日志路径…'}}</code><button type="button" class="btn small" @click="loadLogInfo">刷新位置</button></div>
+  </section>
   <section class="panel log-panel"><div class="panel-title"><div><h2>实时运行记录</h2><small>最近最多保留 500 条日志；清空仅清除当前浏览器显示</small></div><span class="counter">{{filteredLogs.length}} / {{logs.length}} 条</span></div>
    <div class="log-toolbar"><label class="search-label"><span>搜索</span><input v-model.trim="logSearch" placeholder="按关键字搜索日志" aria-label="搜索日志"></label>
     <label class="select-label"><span>级别</span><select v-model="logLevel" aria-label="日志级别"><option value="ALL">全部</option><option value="DEBUG">DEBUG</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></label>
@@ -91,7 +95,8 @@
 </template>
 
 <template v-else-if="page==='settings'">
- <div class="page-title"><div><p class="eyebrow">PLATFORM CONFIGURATION</p><h1>平台与弹幕规则</h1><p class="muted">按需添加多个平台，监听共享当前存档队列。</p></div></div>
+ <div class="page-title"><div><p class="eyebrow">PLATFORM CONFIGURATION</p><h1>平台与弹幕规则</h1><p class="muted">按需添加多个平台，监听共享当前存档队列；修改后请点击保存。</p></div>
+ <div class="title-actions"><button type="button" class="btn primary" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存全部配置'}}</button></div></div>
  <section class="panel channel-toolbar"><div><h2>直播平台</h2><p class="tip">默认隐藏未添加的平台。点击「＋ 添加平台」增加配置；保存后才会连接或停止监听。</p></div>
   <div class="channel-add"><button class="btn primary" type="button" @click="showPlatformPicker=!showPlatformPicker" :aria-expanded="showPlatformPicker">＋ 添加平台</button>
    <div v-if="showPlatformPicker" class="channel-picker"><button v-for="p in addablePlatforms" :key="p.id" @click="addPlatform(p.id)" type="button">{{p.name}} <small>{{p.supported?'弹幕监听可用':'占位预留'}}</small></button><p v-if="!addablePlatforms.length" class="tip">所有平台已添加</p></div>
@@ -112,6 +117,46 @@
     <details class="channel-advanced"><summary>高级：手动填写 B站 Cookie</summary><textarea v-model="config.bilibili.cookie" rows="2" :placeholder="cookieConfigured.bilibili?'已保存，留空保留':'手动粘贴 Cookie'"></textarea></details>
   </template>
   <template v-else-if="p.id==='douyin'"><p class="tip">可直接输入数字房间号，或粘贴 live.douyin.com 网址及包含网址的分享文案，自动解析。短链接需先在浏览器展开。</p>
+  <div class="channel-advanced" style="margin:12px 0;padding:12px;border:1px solid var(--border,#39445a);border-radius:9px">
+   <h3 style="margin:0 0 6px">抖音账号登录与后台礼物采集</h3>
+   <p class="tip">需要本机 Node.js 22+ 与 Chrome/Edge。首次扫码使用独立浏览器资料目录；登录完成后，后台浏览器自动复用登录态、监听全部已保存启用的抖音房间。不会把 Cookie 复制到 Go 配置或前端。</p>
+   <div class="channel-login">
+    <button type="button" class="btn primary small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('login')">打开抖音扫码登录</button>
+    <button type="button" class="btn small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('check')">检测登录状态</button>
+    <button type="button" class="btn small" :disabled="douyinCollectorBusy||douyinCollector.running" @click="controlDouyinCollector('start')">启动后台礼物采集</button>
+    <button type="button" class="btn small" :disabled="douyinCollectorBusy||!douyinCollector.running" @click="controlDouyinCollector('stop')">停止采集/登录</button>
+    <button type="button" class="btn small" @click="refreshDouyinCollector">刷新状态</button>
+   </div>
+   <p class="tip">运行状态：{{douyinCollector.running?'运行中':'未运行'}} · 登录检测：{{douyinCollector.login_state==='cookie_detected'?'已检测到会话 Cookie':douyinCollector.login_state==='waiting_for_scan'?'等待扫码':douyinCollector.login_state==='login_required'?'需要重新扫码':douyinCollector.login_state||'尚未检测'}}。Cookie 检测不等于平台接口鉴权成功。</p>
+   <p v-if="douyinCollector.collector_error||douyinCollector.last_error||douyinCollector.ui_error" class="tip" style="color:var(--danger,#fb7185)">{{douyinCollector.collector_error||douyinCollector.last_error||douyinCollector.ui_error}}</p>
+   <template v-for="(r,k) in (douyinCollector.rooms||{})" :key="k">
+    <p class="tip">{{k}} · {{r.title||r.live_id}} · WSS 礼物帧 {{r.frames||0}} · 转发 {{r.sent||0}} · 出错 {{r.errors||0}}</p>
+    <p v-if="r.room_info?.available" class="tip">此登录会话读取：主播 {{r.room_info.anchor||'未返回'}} · {{r.room_info.title}} · 房间 {{r.room_info.room_id}} · 状态 {{r.room_info.status}} · 观众 {{r.room_info.viewers||'未返回'}}</p>
+   </template>
+   <div class="channel-advanced" style="margin-top:12px">
+    <div class="channel-head-actions"><strong>实时抖音礼物（只读）</strong><button class="btn small" type="button" @click="refreshDouyinGifts">刷新礼物</button></div>
+    <p class="tip">展示本次 Go 运行期间最近的礼物结算事件。钻数是 WebSocket 推送值，不是主播实际到账；此数据不会生成付费排队资格。</p>
+    <div style="overflow-x:auto">
+     <table class="data-table" style="width:100%">
+      <thead><tr><th>送礼用户</th><th>礼物</th><th>数量</th><th>钻数</th><th>房间 ID</th></tr></thead>
+      <tbody>
+       <tr v-for="(ev,i) in douyinRecentGifts" :key="(ev.gift?.event_id||'')+'-'+i">
+        <td>{{ev.username}}</td><td>{{ev.gift?.name}}</td><td>{{ev.gift?.count}}</td><td>{{ev.gift?.diamonds}}</td><td>{{ev.gift?.room_id}}</td>
+       </tr>
+       <tr v-if="!douyinRecentGifts.length"><td colspan="5" class="tip">暂无抖音礼物。请确认已登录、在播、有送礼事件且桥接状态正常。</td></tr>
+      </tbody>
+     </table>
+    </div>
+   </div>
+   <div class="channel-login"><label>查询房间<select v-model="douyinInfoInstance"><option value="douyin">主抖音房间</option><option v-for="x in (config.listeners||[]).filter(x=>x.platform==='douyin'&&x.enabled)" :key="x.id" :value="x.id">{{x.id}} · {{x.room}}</option></select></label><button type="button" class="btn small" @click="refreshDouyinRoomInfo">获取房间信息</button></div>
+   <p v-if="douyinRoomInfo&&!douyinRoomInfo.error" class="tip">标题：{{douyinRoomInfo.Title||'未返回'}} · 主播：{{douyinRoomInfo.AnchorName||'未返回'}} · 房间 ID：{{douyinRoomInfo.RoomID}} · 状态值：{{douyinRoomInfo.Status}} · 观看数：{{douyinRoomInfo.ViewerCount||'未返回'}}</p>
+   <p v-if="douyinRoomInfo?.error" class="tip">直播间信息暂不可用：{{douyinRoomInfo.error}}</p>
+  </div>
+  <p class="tip">抖音礼物：已支持已登录浏览器 WSS 辅助监听（HTTP 弹幕保持原样）。需要安装仓库内 tools/douyin-gift-extension 扩展并配对；
+  <a href="/api/douyin/bridge/token" target="_blank" rel="noopener noreferrer">获取本机配对令牌</a> ·
+  <a href="/api/douyin/bridge/status" target="_blank" rel="noopener noreferrer">查看桥接状态</a> ·
+  <a href="https://github.com/ZzzHe2333/bilipdj-go/blob/main/docs/DOUYIN_GIFT_BRIDGE.md" target="_blank" rel="noopener noreferrer">使用说明（合并后可用）</a>。
+  浏览器礼物仅供展示和统计，不自动授予排队资格。</p>
     <details class="channel-advanced"><summary>高级：Cookie（通常无需配置）</summary><textarea v-model="config.douyin.cookie" rows="2" :placeholder="cookieConfigured.douyin?'已保存，留空保留':'仅在网页请求登录时需要'"></textarea></details>
   </template>
   <p v-else class="tip">{{p.description}}该平台目前仅支持保存配置，不会尝试连接或显示在线状态。</p>
@@ -167,7 +212,11 @@
   </template>
  </article>
 </div>
-<article class="panel rules"><h2>弹幕处理</h2><label class="check"><input type="checkbox" v-model="config.auto_queue"> 开启自动排队</label><label>排队关键词<input v-model.trim="config.command" maxlength="16" placeholder="排队"></label><div class="switch-grid"><label class="check"><input type="checkbox" v-model="config.switches.paidui"> 总排队开关</label><label class="check"><input type="checkbox" v-model="config.switches.guanfu_paidui"> 官服排队</label><label class="check"><input type="checkbox" v-model="config.switches.bfu_paidui"> B服排队</label><label class="check"><input type="checkbox" v-model="config.switches.chaoji_paidui"> 超级排队</label><label class="check"><input type="checkbox" v-model="config.switches.mifu_paidui"> 米服排队</label><label class="check"><input type="checkbox" v-model="config.switches.quxiao_paidui"> 自助取消</label><label class="check"><input type="checkbox" v-model="config.switches.xiugai_paidui"> 自助修改</label></div><label class="check"><input type="checkbox" v-model="config.switches.jianzhang_chadui"> 舰长插队</label><label>每日排队次数限制（0 为无限制）<input type="number" min="0" max="999" v-model.number="config.daily_queue_limit"></label><label>每日重置时间（本机时区，HH:MM）<input type="time" v-model="config.daily_queue_reset_time"></label><label>最大排队人数（0 为不限制）<input type="number" min="0" max="10000" v-model.number="config.max_queue"></label><label>语言设置<input v-model="config.language" placeholder="中文"></label><p class="tip">当前存档槽位：{{config.archive_slot || 1}}。10 个独立存档槽位可在「排队管理」页切换；支持导入原版存档 ZIP 内的所有槽位。</p><p class="tip">发送关键词，或「关键词 + 空格 + 备注」入队。同平台同用户不能重复入队，手动移除后可重新排队。</p></article><button class="btn primary submit" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存并重新连接'}}</button>
+<div class="panel rules" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px">
+  <span class="tip">直播间设置与平台开关修改后不会自动生效，请点击「保存全部配置」。</span>
+  <button type="button" class="btn primary" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存全部配置'}}</button>
+ </div>
+ <article class="panel rules"><h2>弹幕处理</h2><label class="check"><input type="checkbox" v-model="config.auto_queue"> 开启自动排队</label><label>排队关键词<input v-model.trim="config.command" maxlength="16" placeholder="排队"></label><div class="switch-grid"><label class="check"><input type="checkbox" v-model="config.switches.paidui"> 总排队开关</label><label class="check"><input type="checkbox" v-model="config.switches.guanfu_paidui"> 官服排队</label><label class="check"><input type="checkbox" v-model="config.switches.bfu_paidui"> B服排队</label><label class="check"><input type="checkbox" v-model="config.switches.chaoji_paidui"> 超级排队</label><label class="check"><input type="checkbox" v-model="config.switches.mifu_paidui"> 米服排队</label><label class="check"><input type="checkbox" v-model="config.switches.quxiao_paidui"> 自助取消</label><label class="check"><input type="checkbox" v-model="config.switches.xiugai_paidui"> 自助修改</label></div><label class="check"><input type="checkbox" v-model="config.switches.jianzhang_chadui"> 舰长插队</label><label>每日排队次数限制（0 为无限制）<input type="number" min="0" max="999" v-model.number="config.daily_queue_limit"></label><label>每日重置时间（本机时区，HH:MM）<input type="time" v-model="config.daily_queue_reset_time"></label><label>最大排队人数（0 为不限制）<input type="number" min="0" max="10000" v-model.number="config.max_queue"></label><label>语言设置<input v-model="config.language" placeholder="中文"></label><p class="tip">当前存档槽位：{{config.archive_slot || 1}}。10 个独立存档槽位可在「排队管理」页切换；支持导入原版存档 ZIP 内的所有槽位。</p><p class="tip">发送关键词，或「关键词 + 空格 + 备注」入队。同平台同用户不能重复入队，手动移除后可重新排队。</p></article><button class="btn primary submit" :disabled="busy" @click="saveConfig">{{busy?'保存中…':'保存并重新连接'}}</button>
  <article class="panel rules"><h2>礼物排队资格（B站）</h2><p class="tip">默认关闭。只接收 B站直播连接里的 SEND_GIFT；已知礼物目录按电池门槛计算，或按精确礼物名授予资格。此版不支持导入旧版本已消费资格。</p>
 <label class="check"><input type="checkbox" v-model="config.gift_queue.enabled">启用礼物排队资格</label>
 <label class="check"><input type="checkbox" v-model="config.gift_queue.gift_only">只允许用礼物资格入队（发送「插队」）</label>

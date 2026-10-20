@@ -95,6 +95,9 @@ jobs:
             cp assets/bilipdj-go.ico assets/bilipdj-go-tray.ico dist/package/
           fi
           cp -r third_party docs dist/package/
+          mkdir -p dist/package/tools
+          cp -r tools/douyin-gift-extension dist/package/tools/
+          cp -r tools/douyin-gift-collector dist/package/tools/
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             printf "BiliPDJ-Go MCP PREVIEW BUILD (not a release)\\nPR: #3\\nCommit: %s\\nVersion baseline: %s\\nNo GitHub tag or official Release is created by this workflow run.\\n" "$GITHUB_SHA" "${RELEASE_TAG#v}" > dist/package/PREVIEW_BUILD.txt
           fi
