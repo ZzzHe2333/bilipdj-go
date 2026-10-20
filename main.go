@@ -92,7 +92,7 @@ func main() {
 	app := core.New(path, version, "ZzzHe2333/bilipdj-go")
     // GUI-subsystem builds have no visible console. Preserve the standard
     // logger and subprocess diagnostics in the persistent user-data logs/.
-    log.SetOutput(io.MultiWriter(os.Stderr, app.DiagnosticOutput()))
+    log.SetOutput(io.MultiWriter(app.DiagnosticOutput(), os.Stderr))
     log.Printf("BiliPDJ-GO %s starting; data directory=%s; listen=%s", version, path, *listen)
 	app.SetDouyinCollectorListen(*listen)
 	if err := app.SetStoragePlan(plan); err != nil {
