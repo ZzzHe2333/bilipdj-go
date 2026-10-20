@@ -1,0 +1,71 @@
+name: Verify Douyin v0.10.6-test Release Assets
+on:
+  push:
+    branches:
+      - release/v0.10.6-test
+    paths:
+      - .github/workflows/douyin-trial-verify.yml
+permissions:
+  contents: read
+  issues: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = 'v0.10.6-test';
+            const arch = [
+              'windows-amd64','windows-arm64',
+              'linux-amd64','linux-arm64',
+              'darwin-amd64','darwin-arm64'
+            ];
+            const required = ['update-manifest.json'];
+            for (const a of arch) {
+              const zip = 'bilipdj-go-' + a + '.zip';
+              required.push(zip, zip + '.sha256');
+            }
+            let lastError = 'release was not visible';
+            let ready = false;
+            let observed = [];
+            for (let attempt = 0; attempt < 20; attempt++) {
+              try {
+                const {data: release} = await github.rest.repos.getReleaseByTag({
+                  owner, repo, tag
+                });
+                observed = await github.paginate(github.rest.repos.listReleaseAssets, {
+                  owner, repo, release_id: release.id, per_page: 100
+                });
+                const names = new Set(observed.filter(x => x.size > 0 && x.state === 'uploaded').map(x => x.name));
+                const missing = required.filter(name => !names.has(name));
+                if (!release.prerelease) {
+                  lastError = 'Release exists but is not marked prerelease';
+                } else if (missing.length) {
+                  lastError = 'Missing uploaded assets: ' + missing.join(', ');
+                } else {
+                  ready = true;
+                  core.info('Release verified: ' + release.html_url);
+                  core.info('Assets: ' + observed.map(x => x.name + ' (' + x.size + ' B)').join(', '));
+                  break;
+                }
+              } catch (error) {
+                lastError = String(error);
+              }
+              if (attempt < 19) await new Promise(r => setTimeout(r, 12000));
+            }
+            const status = ready ? '验收通过' : '验收未通过';
+            const comment = '## v0.10.6-test 自动验收：' + status + '\n\n'
+              + '时间（UTC）：' + new Date().toISOString() + '\n\n'
+              + 'GitHub Release: https://github.com/' + owner + '/' + repo + '/releases/tag/' + tag + '\n\n'
+              + '期望：GitHub prerelease、6 架构 ZIP、6 份 SHA256、更新清单，共 13 个文件。\n\n'
+              + (ready
+                ? '已验证所有预期资产已上传，且大小均大于零。此次仅验证上传完整性，未做真实抖音房间功能验收。'
+                : '未满足发布验收：' + lastError + '\n\n已观察到的资产：'
+                  + observed.map(x => x.name + '(' + x.size + ')').join(', '));
+            await github.rest.issues.createComment({owner, repo, issue_number: 55, body: comment});
+            if (!ready) core.setFailed(lastError);
