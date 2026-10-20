@@ -126,6 +126,7 @@
    <p v-if="douyinCollector.collector_error||douyinCollector.last_error||douyinCollector.ui_error" class="tip" style="color:var(--danger,#fb7185)">{{douyinCollector.collector_error||douyinCollector.last_error||douyinCollector.ui_error}}</p>
    <template v-for="(r,k) in (douyinCollector.rooms||{})" :key="k">
     <p class="tip">{{k}} · {{r.title||r.live_id}} · WSS 礼物帧 {{r.frames||0}} · 转发 {{r.sent||0}} · 出错 {{r.errors||0}}</p>
+    <p v-if="r.room_info?.available" class="tip">此登录会话读取：主播 {{r.room_info.anchor||'未返回'}} · {{r.room_info.title}} · 房间 {{r.room_info.room_id}} · 状态 {{r.room_info.status}} · 观众 {{r.room_info.viewers||'未返回'}}</p>
    </template>
    <div class="channel-advanced" style="margin-top:12px">
     <div class="channel-head-actions"><strong>实时抖音礼物（只读）</strong><button class="btn small" type="button" @click="refreshDouyinGifts">刷新礼物</button></div>
